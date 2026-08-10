@@ -20,7 +20,7 @@ class TaskResponse(BaseModel):
     priority: str
     status: str
     source: str
-    
+
     class Config:
         from_attributes = True
 
@@ -33,7 +33,7 @@ def create_task(task: TaskCreate, db: Session = Depends(get_db)):
     return new_task
 
 @router.get("/user/{user_id}", response_model=list[TaskResponse])
-def get_user_tasks(user_id: int, db: Session = Depends(get_db)):
+def get_tasks(user_id: int, db: Session = Depends(get_db)):
     return db.query(Task).filter(Task.user_id == user_id).all()
 
 @router.patch("/{task_id}/status")
@@ -44,3 +44,12 @@ def update_status(task_id: int, status: str, db: Session = Depends(get_db)):
     task.status = status
     db.commit()
     return {"message": "Updated", "task_id": task_id, "status": status}
+
+@router.delete("/{task_id}")
+def delete_task(task_id: int, db: Session = Depends(get_db)):
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    db.delete(task)
+    db.commit()
+    return {"message": "Deleted"}

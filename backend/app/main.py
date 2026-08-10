@@ -3,18 +3,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
 from app.routes import auth, tasks, ai
 
-# Creates all DB tables automatically
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="UAILM API",
-    description="Unified AI Life Manager - Powered by Local AI",
+    description="Unified AI Life Manager — Powered by Local AI",
     version="1.0.0"
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # We'll restrict this in production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -26,11 +25,7 @@ app.include_router(ai.router, prefix="/api/ai", tags=["AI"])
 
 @app.get("/")
 async def root():
-    return {
-        "app": "Unified AI Life Manager",
-        "status": "running",
-        "version": "1.0.0"
-    }
+    return {"app": "UAILM", "status": "running"}
 
 @app.get("/health")
 async def health():

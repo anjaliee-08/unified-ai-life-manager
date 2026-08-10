@@ -2,17 +2,21 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from app.services.ollama_provider import OllamaProvider
+from app.services.nlp_service import NLPService
+from app.services.chat_service import ChatService
 
 router = APIRouter()
 ollama = OllamaProvider()
+nlp = NLPService()
+chat_service = ChatService()
 
 @router.get("/status")
-async def ai_status():
-    is_online = await ollama.is_available()
+async def status():
+    online = await ollama.is_available()
     return {
-        "status": "online" if is_online else "offline",
+        "status": "online" if online else "offline",
         "model": ollama.model,
-        "message": None if is_online else "Run: ollama serve"
+        "tip": None if online else "Run: ollama serve"
     }
 
 class ChatRequest(BaseModel):
@@ -20,21 +24,13 @@ class ChatRequest(BaseModel):
 
 @router.post("/chat")
 async def chat(req: ChatRequest):
-    if not await ollama.is_available():
-        return {"response": "⚠️ AI offline. Run: ollama serve"}
-    response = await ollama.generate(
-        prompt=req.message,
-        system_prompt="You are UAILM, a helpful AI life manager assistant. Be concise and helpful."
-    )
+    response = await chat_service.chat(req.message)
     return {"response": response}
 
 @router.post("/chat/stream")
 async def chat_stream(req: ChatRequest):
     async def generate():
-        async for token in ollama.generate_stream(
-            prompt=req.message,
-            system_prompt="You are UAILM, a helpful AI life manager. Be concise."
-        ):
+        async for token in chat_service.chat_stream(req.message):
             yield f"data: {token}\n\n"
     return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -42,13 +38,6 @@ class ExtractRequest(BaseModel):
     text: str
 
 @router.post("/extract")
-async def extract_tasks(req: ExtractRequest):
-    if not await ollama.is_available():
-        return {"error": "AI offline", "tasks": []}
-    
-    response = await ollama.generate(
-        prompt=f"Extract tasks from this text. Reply JSON only:\n{req.text}",
-        system_prompt='You extract tasks from text. Always reply with valid JSON: {"tasks": [{"description": "...", "priority": "high/medium/low", "deadline": "date or null"}]}',
-        temperature=0.1
-    )
-    return {"raw": response}
+async def extract(req: ExtractRequest):
+    result = await nlp.extract(req.text)
+    return result

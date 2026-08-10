@@ -3,10 +3,8 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
 
-# SQLite doesn't need a running server - perfect for day 1
 engine = create_engine(
     settings.database_url,
-    # This line is SQLite specific - remove for PostgreSQL
     connect_args={"check_same_thread": False}
 )
 
