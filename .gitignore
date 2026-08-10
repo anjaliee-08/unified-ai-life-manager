@@ -1,0 +1,24 @@
+# Python
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/*.db
+backend/*.sqlite3
+
+# Environment secrets - NEVER push this
+backend/.env
+
+# Flutter
+frontend/.dart_tool/
+frontend/build/
+frontend/.flutter-plugins
+frontend/.flutter-plugins-dependencies
+frontend/.packages
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
