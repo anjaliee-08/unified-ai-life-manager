@@ -9,7 +9,8 @@ class ChatMessage {
 
 class ChatScreen extends StatefulWidget {
   final String userName;
-  const ChatScreen({super.key, required this.userName});
+  final int userId;
+  const ChatScreen({super.key, required this.userName,required this.userId,});
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -32,32 +33,33 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _sendMessage() async {
-    final text = _controller.text.trim();
-    if (text.isEmpty || _loading) return;
+  final text = _controller.text.trim();
+  if (text.isEmpty || _loading) return;
 
+  setState(() {
+    _messages.add(ChatMessage(text: text, isUser: true));
+    _loading = true;
+  });
+  _controller.clear();
+  _scrollToBottom();
+
+  try {
+    // Use chatWithContext instead of chat
+    final response = await _api.chatWithContext(text, widget.userId);
     setState(() {
-      _messages.add(ChatMessage(text: text, isUser: true));
-      _loading = true;
+      _messages.add(ChatMessage(text: response, isUser: false));
+      _loading = false;
     });
-    _controller.clear();
-    _scrollToBottom();
-
-    try {
-      final response = await _api.chat(text);
-      setState(() {
-        _messages.add(ChatMessage(text: response, isUser: false));
-        _loading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _messages.add(ChatMessage(
-            text: '⚠️ Error connecting to AI. Is Ollama running?',
-            isUser: false));
-        _loading = false;
-      });
-    }
-    _scrollToBottom();
+  } catch (e) {
+    setState(() {
+      _messages.add(ChatMessage(
+          text: '⚠️ Error connecting to AI. Is Ollama running?',
+          isUser: false));
+      _loading = false;
+    });
   }
+  _scrollToBottom();
+}
 
   void _scrollToBottom() {
     Future.delayed(const Duration(milliseconds: 100), () {

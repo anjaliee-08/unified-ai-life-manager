@@ -1,9 +1,11 @@
+import 'settings_screen.dart';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../models/task_model.dart';
 import '../widgets/task_card.dart';
 import 'chat_screen.dart';
 import 'extract_screen.dart';
+
 
 class DashboardScreen extends StatefulWidget {
   final int userId;
@@ -61,43 +63,93 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _loadData();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF12121F),
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildHeader(),
-            _buildAiStatusBadge(),
-            _buildStatsRow(),
-            _buildQuickActions(context),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Pending Tasks',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+   @override
+Widget build(BuildContext context) {
+  return Scaffold(
+    backgroundColor: const Color(0xFF12121F),
+    body: SafeArea(
+      child: Column(
+        children: [
+          _buildHeader(),
+          _buildAiStatusBadge(),
+          _buildStatsRow(),
+          _buildQuickActions(context),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Pending Tasks',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
             ),
-            Expanded(child: _buildTaskList()),
-          ],
-        ),
+          ),
+          Expanded(child: _buildTaskList()),
+        ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showAddTaskDialog(context),
-        backgroundColor: const Color(0xFF6C63FF),
-        child: const Icon(Icons.add, color: Colors.white),
-      ),
-    );
-  }
+    ),
+    floatingActionButton: FloatingActionButton(
+      onPressed: () => _showAddTaskDialog(context),
+      backgroundColor: const Color(0xFF6C63FF),
+      child: const Icon(Icons.add, color: Colors.white),
+    ),
+    bottomNavigationBar: _buildBottomNav(context),
+  );
+}
 
+Widget _buildBottomNav(BuildContext context) {
+  return Container(
+    decoration: const BoxDecoration(
+      color: Color(0xFF1E1E2E),
+      border: Border(
+        top: BorderSide(color: Colors.white10),
+      ),
+    ),
+    child: BottomNavigationBar(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      selectedItemColor: const Color(0xFF6C63FF),
+      unselectedItemColor: Colors.white38,
+      currentIndex: 0,
+      onTap: (index) {
+        if (index == 1) {
+          Navigator.push(context, MaterialPageRoute(
+            builder: (_) => ChatScreen(userName: widget.userName,userId:widget.userId),
+          ));
+        }
+        if (index == 2) {
+          Navigator.push(context, MaterialPageRoute(
+            builder: (_) => SettingsScreen(
+              userId: widget.userId,
+              userName: widget.userName,
+            ),
+          ));
+        }
+      },
+      items: const [
+        BottomNavigationBarItem(
+          icon: Icon(Icons.home_outlined),
+          activeIcon: Icon(Icons.home),
+          label: 'Home',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.chat_bubble_outline),
+          activeIcon: Icon(Icons.chat_bubble),
+          label: 'Chat',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.settings_outlined),
+          activeIcon: Icon(Icons.settings),
+          label: 'Settings',
+        ),
+      ],
+    ),
+  );
+}
   Widget _buildHeader() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
@@ -247,7 +299,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => ChatScreen(userName: widget.userName),
+                    builder: (_) => ChatScreen(userName: widget.userName,userId: widget.userId),
                   ),
                 );
               },

@@ -84,4 +84,31 @@ class ApiService {
     final data = jsonDecode(response.body);
     return data['response'] ?? 'No response';
   }
+  Future<String> chatWithContext(String message, int userId) async {
+  // Fetch user's actual tasks first
+  List<dynamic> tasks = [];
+  try {
+    tasks = await getUserTasks(userId);
+  } catch (_) {}
+
+  // Build context string from real tasks
+  String taskContext = '';
+  if (tasks.isNotEmpty) {
+    final pending = tasks.where((t) => t['status'] == 'pending').toList();
+    if (pending.isNotEmpty) {
+      taskContext = '\n\nUser\'s current pending tasks:\n';
+      for (final t in pending) {
+        taskContext += '- ${t['description']} (${t['priority']} priority)\n';
+      }
+    }
+  }
+
+  final response = await http.post(
+    Uri.parse('$baseUrl/api/ai/chat'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({'message': message + taskContext}),
+  );
+  final data = jsonDecode(response.body);
+  return data['response'] ?? 'No response';
+}
 }
