@@ -1,0 +1,87 @@
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import '../utils/constants.dart';
+
+class ApiService {
+  final String baseUrl = Constants.baseUrl;
+
+  // ── Auth ──────────────────────────────────────────
+
+  Future<Map<String, dynamic>> registerUser(
+      String email, String name) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/auth/register'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'email': email, 'name': name}),
+    );
+    return jsonDecode(response.body);
+  }
+
+  // ── Tasks ─────────────────────────────────────────
+
+  Future<List<dynamic>> getUserTasks(int userId) async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/api/tasks/user/$userId'),
+    );
+    return jsonDecode(response.body);
+  }
+
+  Future<Map<String, dynamic>> createTask(
+      int userId, String description, String priority) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/tasks/'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'user_id': userId,
+        'description': description,
+        'priority': priority,
+        'source': 'manual',
+      }),
+    );
+    return jsonDecode(response.body);
+  }
+
+  Future<void> updateTaskStatus(int taskId, String status) async {
+    await http.patch(
+      Uri.parse('$baseUrl/api/tasks/$taskId/status?status=$status'),
+    );
+  }
+
+  Future<void> deleteTask(int taskId) async {
+    await http.delete(
+      Uri.parse('$baseUrl/api/tasks/$taskId'),
+    );
+  }
+
+  // ── AI ────────────────────────────────────────────
+
+  Future<Map<String, dynamic>> getAiStatus() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/ai/status'),
+      ).timeout(const Duration(seconds: 5));
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'status': 'offline', 'model': 'unknown'};
+    }
+  }
+
+  Future<Map<String, dynamic>> extractTasks(String text) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/ai/extract'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'text': text}),
+    );
+    return jsonDecode(response.body);
+  }
+
+  Future<String> chat(String message) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/ai/chat'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'message': message}),
+    );
+    final data = jsonDecode(response.body);
+    return data['response'] ?? 'No response';
+  }
+}
