@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
+import '../utils/app_theme.dart';
 import 'dashboard_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -10,19 +11,53 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _LoginScreenState extends State<LoginScreen>
+    with SingleTickerProviderStateMixin {
   final ApiService _api = ApiService();
-  final _emailController = TextEditingController();
   final _nameController = TextEditingController();
+  final _emailController = TextEditingController();
   bool _loading = false;
   String _error = '';
 
+  late AnimationController _animController;
+  late Animation<double> _fadeAnim;
+  late Animation<Offset> _slideAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _animController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+    _fadeAnim = CurvedAnimation(
+        parent: _animController, curve: Curves.easeOut);
+    _slideAnim = Tween<Offset>(
+      begin: const Offset(0, 0.08),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+        parent: _animController, curve: Curves.easeOut));
+    _animController.forward();
+  }
+
+  @override
+  void dispose() {
+    _animController.dispose();
+    _nameController.dispose();
+    _emailController.dispose();
+    super.dispose();
+  }
+
   Future<void> _login() async {
-    if (_emailController.text.isEmpty || _nameController.text.isEmpty) {
+    if (_nameController.text.trim().isEmpty ||
+        _emailController.text.trim().isEmpty) {
       setState(() => _error = 'Please fill in all fields');
       return;
     }
-    setState(() { _loading = true; _error = ''; });
+    setState(() {
+      _loading = true;
+      _error = '';
+    });
 
     try {
       final user = await _api.registerUser(
@@ -31,7 +66,6 @@ class _LoginScreenState extends State<LoginScreen> {
       );
 
       if (user.containsKey('id')) {
-        // Save user locally
         final prefs = await SharedPreferences.getInstance();
         await prefs.setInt('user_id', user['id']);
         await prefs.setString('user_name', user['name']);
@@ -40,11 +74,15 @@ class _LoginScreenState extends State<LoginScreen> {
         if (mounted) {
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(
-              builder: (_) => DashboardScreen(
+            PageRouteBuilder(
+              pageBuilder: (_, __, ___) => DashboardScreen(
                 userId: user['id'],
                 userName: user['name'],
               ),
+              transitionsBuilder: (_, anim, __, child) =>
+                  FadeTransition(opacity: anim, child: child),
+              transitionDuration:
+                  const Duration(milliseconds: 300),
             ),
           );
         }
@@ -54,9 +92,9 @@ class _LoginScreenState extends State<LoginScreen> {
           _loading = false;
         });
       }
-    } catch (e) {
+    } catch (_) {
       setState(() {
-        _error = 'Cannot connect to server. Is backend running?';
+        _error = 'Cannot connect. Is the backend running?';
         _loading = false;
       });
     }
@@ -65,93 +103,120 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF12121F),
+      backgroundColor: AppColors.bg,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(28),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Spacer(),
-              const Icon(Icons.auto_awesome,
-                  color: Color(0xFF6C63FF), size: 48),
-              const SizedBox(height: 16),
-              const Text('UAILM',
-                  style: TextStyle(
+        child: FadeTransition(
+          opacity: _fadeAnim,
+          child: SlideTransition(
+            position: _slideAnim,
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Spacer(flex: 2),
+                  // Logo area
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      gradient: AppTheme.primaryGradient,
+                      borderRadius:
+                          BorderRadius.circular(AppRadius.lg),
+                    ),
+                    child: const Icon(
+                      Icons.auto_awesome_rounded,
                       color: Colors.white,
-                      fontSize: 36,
-                      fontWeight: FontWeight.bold)),
-              const Text('Unified AI Life Manager',
-                  style: TextStyle(color: Colors.white54, fontSize: 15)),
-              const SizedBox(height: 8),
-              const Text('Your tasks. Your AI. Your device.',
-                  style: TextStyle(color: Colors.white38, fontSize: 13)),
-              const Spacer(),
-              TextField(
-                controller: _nameController,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  labelText: 'Your Name',
-                  labelStyle: const TextStyle(color: Colors.white54),
-                  prefixIcon: const Icon(Icons.person_outline,
-                      color: Colors.white38),
-                  filled: true,
-                  fillColor: const Color(0xFF1E1E2E),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: BorderSide.none,
+                      size: 28,
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: _emailController,
-                style: const TextStyle(color: Colors.white),
-                keyboardType: TextInputType.emailAddress,
-                decoration: InputDecoration(
-                  labelText: 'Email Address',
-                  labelStyle: const TextStyle(color: Colors.white54),
-                  prefixIcon: const Icon(Icons.email_outlined,
-                      color: Colors.white38),
-                  filled: true,
-                  fillColor: const Color(0xFF1E1E2E),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: BorderSide.none,
+                  const SizedBox(height: AppSpacing.md),
+                  Text('UAILM',
+                      style: AppTextStyles.displayLarge),
+                  Text(
+                    'Your private AI life manager',
+                    style: AppTextStyles.bodyMedium,
                   ),
-                ),
-              ),
-              if (_error.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Text(_error,
-                    style: const TextStyle(
-                        color: Colors.redAccent, fontSize: 13)),
-              ],
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _loading ? null : _login,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF6C63FF),
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
+                  const SizedBox(height: AppSpacing.xs),
+                  Row(
+                    children: [
+                      _pill('Local AI'),
+                      const SizedBox(width: AppSpacing.sm),
+                      _pill('Private'),
+                      const SizedBox(width: AppSpacing.sm),
+                      _pill('Offline'),
+                    ],
                   ),
-                  child: _loading
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : const Text('Get Started',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold)),
-                ),
+                  const Spacer(flex: 2),
+
+                  // Form
+                  AppTextField(
+                    controller: _nameController,
+                    hint: 'Your name',
+                    label: 'NAME',
+                    prefixIcon: Icons.person_outline_rounded,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  AppTextField(
+                    controller: _emailController,
+                    hint: 'your@email.com',
+                    label: 'EMAIL',
+                    prefixIcon: Icons.email_outlined,
+                    keyboardType: TextInputType.emailAddress,
+                  ),
+
+                  if (_error.isNotEmpty) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    Row(
+                      children: [
+                        const Icon(Icons.error_outline_rounded,
+                            color: AppColors.error, size: 14),
+                        const SizedBox(width: 6),
+                        Text(_error,
+                            style: AppTextStyles.bodySmall
+                                .copyWith(
+                                    color: AppColors.error)),
+                      ],
+                    ),
+                  ],
+
+                  const SizedBox(height: AppSpacing.md),
+                  AppButton(
+                    label: 'Get Started',
+                    loading: _loading,
+                    width: double.infinity,
+                    onTap: _login,
+                  ),
+                  const Spacer(flex: 1),
+                  Center(
+                    child: Text(
+                      'All data stays on your device',
+                      style: AppTextStyles.caption,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                ],
               ),
-              const Spacer(),
-            ],
+            ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _pill(String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm, vertical: 3),
+      decoration: BoxDecoration(
+        color: AppColors.primary.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(AppRadius.full),
+        border: Border.all(
+            color: AppColors.primary.withOpacity(0.2),
+            width: 0.5),
+      ),
+      child: Text(label,
+          style: AppTextStyles.caption
+              .copyWith(color: AppColors.primary)),
     );
   }
 }

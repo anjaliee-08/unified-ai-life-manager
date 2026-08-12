@@ -1,3 +1,4 @@
+import '../utils/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/login_screen.dart';
@@ -18,12 +19,7 @@ class UAILMApp extends StatelessWidget {
     return MaterialApp(
       title: 'UAILM',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: const Color(0xFF12121F),
-        colorScheme: const ColorScheme.dark(
-          primary: Color(0xFF6C63FF),
-        ),
-      ),
+      theme: AppTheme.dark,
       home: const SplashRouter(),
     );
   }

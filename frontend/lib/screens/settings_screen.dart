@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
+import '../utils/app_theme.dart';
 import 'login_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -31,6 +32,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadStatus() async {
     final status = await _api.getAiStatus();
+    if (!mounted) return;
     setState(() {
       _aiOnline = status['status'] == 'online';
       _aiModel = status['model'] ?? '';
@@ -39,30 +41,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _logout() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E2E),
-        title: const Text('Logout',
-            style: TextStyle(color: Colors.white)),
-        content: const Text(
-            'Are you sure you want to logout?',
-            style: TextStyle(color: Colors.white70)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel',
-                style: TextStyle(color: Colors.white54)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Logout',
-                style: TextStyle(color: Colors.redAccent)),
-          ),
-        ],
-      ),
+    final confirmed = await _showConfirmDialog(
+      title: 'Logout',
+      message: 'Are you sure you want to logout?',
+      confirmLabel: 'Logout',
+      destructive: true,
     );
-
     if (confirmed == true) {
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();
@@ -70,138 +54,177 @@ class _SettingsScreenState extends State<SettingsScreen> {
         Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(builder: (_) => const LoginScreen()),
-          (route) => false,
+          (_) => false,
         );
       }
     }
   }
 
-  Future<void> _clearAllTasks() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E2E),
-        title: const Text('Clear All Tasks',
-            style: TextStyle(color: Colors.white)),
-        content: const Text(
-            'This will delete all your tasks permanently.',
-            style: TextStyle(color: Colors.white70)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel',
-                style: TextStyle(color: Colors.white54)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete All',
-                style: TextStyle(color: Colors.redAccent)),
-          ),
-        ],
-      ),
+  Future<void> _clearTasks() async {
+    final confirmed = await _showConfirmDialog(
+      title: 'Clear All Tasks',
+      message: 'This will permanently delete all your tasks.',
+      confirmLabel: 'Delete All',
+      destructive: true,
     );
-
     if (confirmed == true) {
       final tasks = await _api.getUserTasks(widget.userId);
-      for (final task in tasks) {
-        await _api.deleteTask(task['id']);
-      }
+     for (final t in tasks) {
+  await _api.deleteTask(t['id']);
+}
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('All tasks deleted'),
-            backgroundColor: Colors.redAccent,
+          SnackBar(
+            content: const Text('All tasks deleted'),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+                borderRadius:
+                    BorderRadius.circular(AppRadius.md)),
+            margin: const EdgeInsets.all(AppSpacing.md),
           ),
         );
       }
     }
+  }
+
+  Future<bool?> _showConfirmDialog({
+    required String title,
+    required String message,
+    required String confirmLabel,
+    bool destructive = false,
+  }) {
+    return showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadius.xl)),
+        title: Text(title, style: AppTextStyles.titleLarge),
+        content: Text(message, style: AppTextStyles.bodyMedium),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel',
+                style: AppTextStyles.labelLarge
+                    .copyWith(color: AppColors.textSecondary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(
+              confirmLabel,
+              style: AppTextStyles.labelLarge.copyWith(
+                color: destructive
+                    ? AppColors.error
+                    : AppColors.primary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF12121F),
+      backgroundColor: AppColors.bg,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1E1E2E),
-        title: const Text('Settings',
-            style: TextStyle(color: Colors.white)),
-        iconTheme: const IconThemeData(color: Colors.white),
+        title: const Text('Settings'),
+        backgroundColor: AppColors.bg,
+        automaticallyImplyLeading: false,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(0.5),
+          child:
+              Container(height: 0.5, color: AppColors.divider),
+        ),
       ),
       body: _loading
           ? const Center(
-              child: CircularProgressIndicator(color: Color(0xFF6C63FF)))
+              child: CircularProgressIndicator(
+                  color: AppColors.primary))
           : ListView(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(AppSpacing.md),
               children: [
+                // Profile
+                _section('Profile', [
+                  _infoRow(
+                    icon: Icons.person_rounded,
+                    label: 'Name',
+                    value: widget.userName,
+                  ),
+                ]),
+                const SizedBox(height: AppSpacing.md),
 
-                // Profile section
-                _sectionHeader('Profile'),
-                _infoTile(
-                  icon: Icons.person_outline,
-                  title: 'Name',
-                  value: widget.userName,
-                ),
-                const SizedBox(height: 20),
+                // AI Engine
+                _section('AI Engine', [
+                  _aiStatusRow(),
+                  const SizedBox(height: AppSpacing.sm),
+                  _infoRow(
+                    icon: Icons.memory_rounded,
+                    label: 'Model',
+                    value: _aiModel.isEmpty
+                        ? 'Not loaded'
+                        : _aiModel,
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  _infoRow(
+                    icon: Icons.shield_rounded,
+                    label: 'Privacy',
+                    value: 'Local AI · No cloud inference',
+                  ),
+                ]),
+                const SizedBox(height: AppSpacing.md),
 
-                // AI section
-                _sectionHeader('AI Engine'),
-                _statusTile(),
-                const SizedBox(height: 8),
-                _infoTile(
-                  icon: Icons.memory,
-                  title: 'Model',
-                  value: _aiModel.isEmpty ? 'Not loaded' : _aiModel,
-                ),
-                const SizedBox(height: 8),
-                _infoTile(
-                  icon: Icons.lock_outline,
-                  title: 'Privacy',
-                  value: '100% Local — No cloud, no tracking',
-                ),
-                const SizedBox(height: 20),
+                // About
+                _section('About', [
+                  _infoRow(
+                    icon: Icons.info_outline_rounded,
+                    label: 'Version',
+                    value: '1.0.0',
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  _infoRow(
+                    icon: Icons.code_rounded,
+                    label: 'Stack',
+                    value: 'Flutter · FastAPI · Ollama',
+                  ),
+                ]),
+                const SizedBox(height: AppSpacing.md),
 
-                // About section
-                _sectionHeader('About'),
-                _infoTile(
-                  icon: Icons.info_outline,
-                  title: 'Version',
-                  value: '1.0.0',
-                ),
-                _infoTile(
-                  icon: Icons.code,
-                  title: 'Stack',
-                  value: 'Flutter + FastAPI + Ollama',
-                ),
-                const SizedBox(height: 20),
-
-                // Danger zone
-                _sectionHeader('Data'),
-                _actionTile(
-                  icon: Icons.delete_sweep_outlined,
-                  title: 'Clear All Tasks',
-                  subtitle: 'Permanently delete all tasks',
-                  color: Colors.orangeAccent,
-                  onTap: _clearAllTasks,
-                ),
-                const SizedBox(height: 8),
-                _actionTile(
-                  icon: Icons.logout,
-                  title: 'Logout',
-                  subtitle: 'Sign out of your account',
-                  color: Colors.redAccent,
-                  onTap: _logout,
-                ),
-                const SizedBox(height: 40),
+                // Data
+                _section('Data', [
+                  _actionRow(
+                    icon: Icons.delete_sweep_rounded,
+                    label: 'Clear All Tasks',
+                    subtitle: 'Permanently delete all tasks',
+                    color: AppColors.warning,
+                    onTap: _clearTasks,
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  _actionRow(
+                    icon: Icons.logout_rounded,
+                    label: 'Logout',
+                    subtitle: 'Sign out of your account',
+                    color: AppColors.error,
+                    onTap: _logout,
+                  ),
+                ]),
+                const SizedBox(height: AppSpacing.xl),
 
                 // Footer
-                const Center(
-                  child: Text(
-                    'Built with ❤️ by Anjali\nAll AI runs locally on your device',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Colors.white24,
-                      fontSize: 12,
-                    ),
+                Center(
+                  child: Column(
+                    children: [
+                      const Icon(Icons.auto_awesome_rounded,
+                          color: AppColors.textMuted, size: 20),
+                      const SizedBox(height: AppSpacing.sm),
+                      Text('Built by Anjali',
+                          style: AppTextStyles.bodySmall),
+                      Text(
+                          'All AI runs locally on your device',
+                          style: AppTextStyles.caption),
+                    ],
                   ),
                 ),
               ],
@@ -209,86 +232,84 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _sectionHeader(String title) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Text(
-        title.toUpperCase(),
-        style: const TextStyle(
-          color: Color(0xFF6C63FF),
-          fontSize: 11,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 1.5,
+  Widget _section(String title, List<Widget> children) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding:
+              const EdgeInsets.only(bottom: AppSpacing.sm),
+          child: Text(
+            title.toUpperCase(),
+            style: AppTextStyles.caption.copyWith(
+              color: AppColors.primary,
+              letterSpacing: 1.2,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
         ),
-      ),
+        ...children,
+      ],
     );
   }
 
-  Widget _statusTile() {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1E2E),
-        borderRadius: BorderRadius.circular(14),
-      ),
+  Widget _aiStatusRow() {
+    final color =
+        _aiOnline ? AppColors.accent : AppColors.error;
+    return AppCard(
       child: Row(
         children: [
-          Icon(Icons.circle,
-              size: 10,
-              color: _aiOnline ? Colors.greenAccent : Colors.redAccent),
-          const SizedBox(width: 12),
+          Icon(Icons.circle, size: 8, color: color),
+          const SizedBox(width: AppSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('AI Status',
-                    style: TextStyle(color: Colors.white, fontSize: 14)),
+                Text('AI Status',
+                    style: AppTextStyles.bodySmall
+                        .copyWith(
+                            color: AppColors.textSecondary)),
                 Text(
-                  _aiOnline ? 'Online' : 'Offline — Run: ollama serve',
-                  style: TextStyle(
-                    color: _aiOnline ? Colors.greenAccent : Colors.redAccent,
-                    fontSize: 12,
-                  ),
+                  _aiOnline
+                      ? 'Online'
+                      : 'Offline — Run: ollama serve',
+                  style: AppTextStyles.bodyLarge
+                      .copyWith(color: color),
                 ),
               ],
             ),
           ),
-          IconButton(
-            onPressed: _loadStatus,
-            icon: const Icon(Icons.refresh, color: Colors.white38, size: 18),
+          GestureDetector(
+            onTap: () {
+              setState(() => _loading = true);
+              _loadStatus();
+            },
+            child: const Icon(Icons.refresh_rounded,
+                color: AppColors.textMuted, size: 18),
           ),
         ],
       ),
     );
   }
 
-  Widget _infoTile({
+  Widget _infoRow({
     required IconData icon,
-    required String title,
+    required String label,
     required String value,
   }) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1E2E),
-        borderRadius: BorderRadius.circular(14),
-      ),
+    return AppCard(
       child: Row(
         children: [
-          Icon(icon, color: Colors.white38, size: 20),
-          const SizedBox(width: 12),
+          Icon(icon, color: AppColors.textMuted, size: 18),
+          const SizedBox(width: AppSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title,
-                    style: const TextStyle(
-                        color: Colors.white54, fontSize: 12)),
-                Text(value,
-                    style: const TextStyle(
-                        color: Colors.white, fontSize: 14)),
+                Text(label,
+                    style: AppTextStyles.bodySmall.copyWith(
+                        color: AppColors.textSecondary)),
+                Text(value, style: AppTextStyles.bodyLarge),
               ],
             ),
           ),
@@ -297,43 +318,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _actionTile({
+  Widget _actionRow({
     required IconData icon,
-    required String title,
+    required String label,
     required String subtitle,
     required Color color,
     required VoidCallback onTap,
   }) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.08),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: color.withOpacity(0.2)),
-        ),
+      child: AppCard(
+        color: color.withOpacity(0.06),
         child: Row(
           children: [
-            Icon(icon, color: color, size: 20),
-            const SizedBox(width: 12),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                borderRadius:
+                    BorderRadius.circular(AppRadius.sm),
+              ),
+              child: Icon(icon, color: color, size: 16),
+            ),
+            const SizedBox(width: AppSpacing.md),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title,
-                      style: TextStyle(
-                          color: color,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600)),
+                  Text(label,
+                      style: AppTextStyles.bodyLarge
+                          .copyWith(color: color)),
                   Text(subtitle,
-                      style: const TextStyle(
-                          color: Colors.white38, fontSize: 12)),
+                      style: AppTextStyles.bodySmall),
                 ],
               ),
             ),
-            Icon(Icons.chevron_right, color: color.withOpacity(0.5)),
+            Icon(Icons.chevron_right_rounded,
+                color: color.withOpacity(0.5), size: 18),
           ],
         ),
       ),

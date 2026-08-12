@@ -1,6 +1,7 @@
-import '../services/notification_service.dart';  // ADD at top
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../services/notification_service.dart';
+import '../utils/app_theme.dart';
 
 class ExtractScreen extends StatefulWidget {
   final int userId;
@@ -13,42 +14,47 @@ class ExtractScreen extends StatefulWidget {
 class _ExtractScreenState extends State<ExtractScreen> {
   final ApiService _api = ApiService();
   final TextEditingController _controller = TextEditingController();
-  List<dynamic> _extractedTasks = [];
+  List<dynamic> _tasks = [];
   bool _loading = false;
   bool _extracted = false;
+  String _error = '';
 
- Future<void> _extract() async {
-  if (_controller.text.isEmpty) return;
-  setState(() { _loading = true; _extracted = false; });
-
-  try {
-    final result = await _api.extractTasks(_controller.text);
-    final tasks = result['tasks'] ?? [];
-    
+  Future<void> _extract() async {
+    if (_controller.text.trim().isEmpty) return;
     setState(() {
-      _extractedTasks = tasks;
-      _loading = false;
-      _extracted = true;
+      _loading = true;
+      _extracted = false;
+      _error = '';
     });
 
-    // Notify user how many tasks were found
-    if (tasks.isNotEmpty) {
-      await NotificationService().notifyTasksExtracted(tasks.length);
-      
-      // Extra notification for high priority tasks
-      for (final task in tasks) {
-        if (task['priority'] == 'high') {
-          await NotificationService().notifyHighPriorityTask(
-            task['description']
-          );
-          break; // Only notify for first high priority task
+    try {
+      final result = await _api.extractTasks(_controller.text);
+      final tasks = result['tasks'] ?? [];
+      if (!mounted) return;
+      setState(() {
+        _tasks = tasks;
+        _loading = false;
+        _extracted = true;
+      });
+      if (tasks.isNotEmpty) {
+        await NotificationService()
+            .notifyTasksExtracted(tasks.length);
+        for (final t in tasks) {
+          if (t['priority'] == 'high') {
+            await NotificationService()
+                .notifyHighPriorityTask(t['description']);
+            break;
+          }
         }
       }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = 'Could not connect to AI. Is Ollama running?';
+      });
     }
-  } catch (e) {
-    setState(() => _loading = false);
   }
-}
 
   Future<void> _saveTask(Map<String, dynamic> task) async {
     await _api.createTask(
@@ -56,155 +62,213 @@ class _ExtractScreenState extends State<ExtractScreen> {
       task['description'],
       task['priority'] ?? 'medium',
     );
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Task saved!'),
-          backgroundColor: Color(0xFF6C63FF),
-        ),
-      );
-    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Task saved ✓',
+            style: AppTextStyles.bodyMedium
+                .copyWith(color: Colors.white)),
+        backgroundColor: AppColors.success,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+            borderRadius:
+                BorderRadius.circular(AppRadius.md)),
+        margin: const EdgeInsets.all(AppSpacing.md),
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF12121F),
+      backgroundColor: AppColors.bg,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1E1E2E),
-        title: const Text('Extract Tasks',
-            style: TextStyle(color: Colors.white)),
-        iconTheme: const IconThemeData(color: Colors.white),
+        title: const Text('Extract Tasks'),
+        backgroundColor: AppColors.bg,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(0.5),
+          child: Container(height: 0.5, color: AppColors.divider),
+        ),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Paste any text — email, message, note',
-              style: TextStyle(color: Colors.white54, fontSize: 13),
+      body: ListView(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        children: [
+          // Info card
+          AppCard(
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withOpacity(0.15),
+                    borderRadius:
+                        BorderRadius.circular(AppRadius.sm),
+                  ),
+                  child: const Icon(Icons.auto_awesome_rounded,
+                      color: AppColors.primary, size: 16),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Text(
+                    'Paste any text — email, message, note. UAILM will find the tasks.',
+                    style: AppTextStyles.bodyMedium,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
-            TextField(
+          ),
+          const SizedBox(height: AppSpacing.md),
+
+          // Text input
+          Container(
+            decoration: BoxDecoration(
+              color: AppColors.card,
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              border:
+                  Border.all(color: AppColors.divider, width: 0.5),
+            ),
+            child: TextField(
               controller: _controller,
-              maxLines: 5,
-              style: const TextStyle(color: Colors.white),
+              maxLines: 6,
+              style: AppTextStyles.bodyLarge,
               decoration: InputDecoration(
-                hintText: 'e.g. "Submit report by Friday 5pm, meeting Monday 10am..."',
-                hintStyle: const TextStyle(color: Colors.white24),
-                filled: true,
-                fillColor: const Color(0xFF1E1E2E),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: BorderSide.none,
-                ),
+                hintText:
+                    'e.g. "Submit ML report by tomorrow 5pm. Team meeting Friday at 2pm..."',
+                hintStyle: AppTextStyles.bodyLarge
+                    .copyWith(color: AppColors.textMuted),
+                border: InputBorder.none,
+                contentPadding:
+                    const EdgeInsets.all(AppSpacing.md),
               ),
             ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _loading ? null : _extract,
-                icon: _loading
-                    ? const SizedBox(
-                        width: 16, height: 16,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.auto_awesome, color: Colors.white),
-                label: Text(_loading ? 'Extracting...' : 'Extract with AI',
-                    style: const TextStyle(color: Colors.white)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF6C63FF),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+
+          // Extract button
+          AppButton(
+            label: _loading ? 'Extracting...' : 'Extract with AI',
+            icon: Icons.auto_awesome_rounded,
+            loading: _loading,
+            width: double.infinity,
+            onTap: _extract,
+          ),
+
+          // Error state
+          if (_error.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.md),
+            AppCard(
+              color: AppColors.error.withOpacity(0.08),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline_rounded,
+                      color: AppColors.error, size: 16),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: Text(_error,
+                        style: AppTextStyles.bodyMedium
+                            .copyWith(color: AppColors.error)),
+                  ),
+                ],
               ),
             ),
-            if (_extracted) ...[
-              const SizedBox(height: 20),
-              Text(
-                _extractedTasks.isEmpty
-                    ? 'No tasks found in this text'
-                    : '${_extractedTasks.length} task(s) found',
-                style: TextStyle(
-                  color: _extractedTasks.isEmpty
-                      ? Colors.white38
-                      : Colors.greenAccent,
-                  fontWeight: FontWeight.bold,
+          ],
+
+          // Results
+          if (_extracted) ...[
+            const SizedBox(height: AppSpacing.lg),
+            SectionHeader(
+              title: _tasks.isEmpty
+                  ? 'No tasks found'
+                  : '${_tasks.length} task${_tasks.length > 1 ? 's' : ''} found',
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            if (_tasks.isEmpty)
+              EmptyState(
+                icon: Icons.search_off_rounded,
+                title: 'Nothing found',
+                subtitle:
+                    'No actionable tasks were detected in this text.',
+              )
+            else
+              ..._tasks.map((task) => _buildExtractedTask(task)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildExtractedTask(Map<String, dynamic> task) {
+    final priority = task['priority'] ?? 'medium';
+    final color = AppTheme.priorityColor(priority);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: AppColors.divider, width: 0.5),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        child: IntrinsicHeight(
+          child: Row(
+            children: [
+              Container(
+                width: 3,
+                decoration: BoxDecoration(
+                  gradient: AppTheme.priorityGradient(priority),
                 ),
               ),
-              const SizedBox(height: 12),
               Expanded(
-                child: ListView.builder(
-                  itemCount: _extractedTasks.length,
-                  itemBuilder: (_, i) {
-                    final task = _extractedTasks[i];
-                    final priority = task['priority'] ?? 'medium';
-                    final color = priority == 'high'
-                        ? Colors.redAccent
-                        : priority == 'medium'
-                            ? Colors.orangeAccent
-                            : Colors.greenAccent;
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E1E2E),
-                        borderRadius: BorderRadius.circular(14),
-                       border: Border(
-                         left: BorderSide(color: color, width: 3),
-                                      ),
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                          children: [
+                            Text(task['description'] ?? '',
+                                style: AppTextStyles.bodyLarge),
+                            const SizedBox(height: 6),
+                            Row(
                               children: [
-                                Text(task['description'] ?? '',
-                                    style: const TextStyle(
-                                        color: Colors.white, fontSize: 14)),
-                                const SizedBox(height: 4),
-                                Row(
-                                  children: [
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: color.withValues(alpha: 0.15),
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: Text(priority,
-                                          style: TextStyle(
-                                              color: color, fontSize: 11)),
-                                    ),
-                                    if (task['deadline'] != null) ...[
-                                      const SizedBox(width: 8),
-                                      Text('📅 ${task['deadline']}',
-                                          style: const TextStyle(
-                                              color: Colors.white38,
-                                              fontSize: 11)),
-                                    ],
-                                  ],
-                                ),
+                                AppChip(
+                                    label: priority, color: color),
+                                if (task['deadline'] != null) ...[
+                                  const SizedBox(width: 6),
+                                  AppChip(
+                                    label: task['deadline'],
+                                    color: AppColors.textSecondary,
+                                    icon: Icons.calendar_today_rounded,
+                                  ),
+                                ],
                               ],
                             ),
-                          ),
-                          TextButton(
-                            onPressed: () => _saveTask(task),
-                            child: const Text('Save',
-                                style: TextStyle(color: Color(0xFF6C63FF))),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    );
-                  },
+                      TextButton(
+                        onPressed: () => _saveTask(task),
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppColors.primary,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.sm,
+                              vertical: 4),
+                        ),
+                        child: Text('Save',
+                            style: AppTextStyles.labelLarge
+                                .copyWith(
+                                    color: AppColors.primary)),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
-          ],
+          ),
         ),
       ),
     );
