@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/login_screen.dart';
 import 'screens/dashboard_screen.dart';
+import 'services/notification_service.dart';   // ADD THIS
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();    // ADD THIS
+  await NotificationService().initialize();      // ADD THIS
   runApp(const UAILMApp());
 }
 
@@ -26,7 +29,6 @@ class UAILMApp extends StatelessWidget {
   }
 }
 
-// Checks if user already logged in
 class SplashRouter extends StatefulWidget {
   const SplashRouter({super.key});
 
@@ -71,7 +73,22 @@ class _SplashRouterState extends State<SplashRouter> {
     return const Scaffold(
       backgroundColor: Color(0xFF12121F),
       body: Center(
-        child: CircularProgressIndicator(color: Color(0xFF6C63FF)),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.auto_awesome,
+                color: Color(0xFF6C63FF), size: 56),
+            SizedBox(height: 16),
+            Text('UAILM',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold)),
+            SizedBox(height: 8),
+            CircularProgressIndicator(
+                color: Color(0xFF6C63FF)),
+          ],
+        ),
       ),
     );
   }

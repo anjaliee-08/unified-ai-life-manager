@@ -1,3 +1,4 @@
+import '../services/notification_service.dart';  // ADD at top
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 
@@ -16,21 +17,38 @@ class _ExtractScreenState extends State<ExtractScreen> {
   bool _loading = false;
   bool _extracted = false;
 
-  Future<void> _extract() async {
-    if (_controller.text.isEmpty) return;
-    setState(() { _loading = true; _extracted = false; });
+ Future<void> _extract() async {
+  if (_controller.text.isEmpty) return;
+  setState(() { _loading = true; _extracted = false; });
 
-    try {
-      final result = await _api.extractTasks(_controller.text);
-      setState(() {
-        _extractedTasks = result['tasks'] ?? [];
-        _loading = false;
-        _extracted = true;
-      });
-    } catch (e) {
-      setState(() => _loading = false);
+  try {
+    final result = await _api.extractTasks(_controller.text);
+    final tasks = result['tasks'] ?? [];
+    
+    setState(() {
+      _extractedTasks = tasks;
+      _loading = false;
+      _extracted = true;
+    });
+
+    // Notify user how many tasks were found
+    if (tasks.isNotEmpty) {
+      await NotificationService().notifyTasksExtracted(tasks.length);
+      
+      // Extra notification for high priority tasks
+      for (final task in tasks) {
+        if (task['priority'] == 'high') {
+          await NotificationService().notifyHighPriorityTask(
+            task['description']
+          );
+          break; // Only notify for first high priority task
+        }
+      }
     }
+  } catch (e) {
+    setState(() => _loading = false);
   }
+}
 
   Future<void> _saveTask(Map<String, dynamic> task) async {
     await _api.createTask(

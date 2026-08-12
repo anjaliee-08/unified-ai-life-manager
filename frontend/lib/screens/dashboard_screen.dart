@@ -5,7 +5,7 @@ import '../models/task_model.dart';
 import '../widgets/task_card.dart';
 import 'chat_screen.dart';
 import 'extract_screen.dart';
-
+import '../services/notification_service.dart';
 
 class DashboardScreen extends StatefulWidget {
   final int userId;
@@ -53,10 +53,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  Future<void> _markDone(int taskId) async {
-    await _api.updateTaskStatus(taskId, 'done');
-    _loadData();
-  }
+ Future<void> _markDone(int taskId, String description) async {
+  await _api.updateTaskStatus(taskId, 'done');
+  await NotificationService().showNotification(
+    id: taskId,
+    title: '✅ Task Completed!',
+    body: description,
+  );
+  _loadData();
+}
 
   Future<void> _deleteTask(int taskId) async {
     await _api.deleteTask(taskId);
@@ -366,8 +371,8 @@ Widget _buildBottomNav(BuildContext context) {
       itemCount: _tasks.length,
       itemBuilder: (_, i) => TaskCard(
         task: _tasks[i],
-        onDone: () => _markDone(_tasks[i].id),
-        onDelete: () => _deleteTask(_tasks[i].id),
+  onDone: () => _markDone(_tasks[i].id, _tasks[i].description),
+  onDelete: () => _deleteTask(_tasks[i].id),
       ),
     );
   }
