@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
 from app.routes import auth, tasks, ai
+from app.routes import agent
 
 Base.metadata.create_all(bind=engine)
 
@@ -22,6 +23,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["Tasks"])
 app.include_router(ai.router, prefix="/api/ai", tags=["AI"])
+app.include_router(agent.router, prefix="/api/agent", tags=["Agent"])
 
 @app.get("/")
 async def root():

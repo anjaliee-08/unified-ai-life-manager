@@ -111,4 +111,45 @@ class ApiService {
   final data = jsonDecode(response.body);
   return data['response'] ?? 'No response';
 }
+// ── Agent (intelligent AI assistant) ─────────────────────────────
+
+Future<Map<String, dynamic>> agentChat({
+  required int userId,
+  required String message,
+  String? confirmAction,
+  int? confirmTaskId,
+}) async {
+  final body = <String, dynamic>{
+    'user_id': userId,
+    'message': message,
+  };
+  if (confirmAction != null) body['confirm_action'] = confirmAction;
+  if (confirmTaskId != null) body['confirm_task_id'] = confirmTaskId;
+
+  final response = await http.post(
+    Uri.parse('$baseUrl/api/agent/chat'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode(body),
+  ).timeout(const Duration(seconds: 90));
+
+  return jsonDecode(response.body);
+}
+
+Future<List<dynamic>> getTodayTasks(int userId) async {
+  final r = await http.get(
+      Uri.parse('$baseUrl/api/agent/tasks/today/$userId'));
+  return jsonDecode(r.body);
+}
+
+Future<List<dynamic>> getOverdueTasks(int userId) async {
+  final r = await http.get(
+      Uri.parse('$baseUrl/api/agent/tasks/overdue/$userId'));
+  return jsonDecode(r.body);
+}
+
+Future<List<dynamic>> getHighPriorityTasks(int userId) async {
+  final r = await http.get(
+      Uri.parse('$baseUrl/api/agent/tasks/high-priority/$userId'));
+  return jsonDecode(r.body);
+}
 }
