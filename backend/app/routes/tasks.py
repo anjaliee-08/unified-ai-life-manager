@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
+from datetime import datetime
 from app.database import get_db
 from app.models.task import Task
 
@@ -42,6 +43,9 @@ def update_status(task_id: int, status: str, db: Session = Depends(get_db)):
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     task.status = status
+    # Record completion time for ML history
+    if status == "done":
+        task.completed_at = datetime.now()
     db.commit()
     return {"message": "Updated", "task_id": task_id, "status": status}
 

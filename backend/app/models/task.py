@@ -7,12 +7,11 @@ class Task(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    
     description = Column(String, nullable=False)
     deadline = Column(DateTime, nullable=True)
     priority = Column(String, default="medium")  # high/medium/low
     status = Column(String, default="pending")   # pending/done/dismissed
     source = Column(String, default="manual")    # email/message/manual
     confidence = Column(Float, default=1.0)      # AI confidence score
-    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    completed_at = Column(DateTime, nullable=True)

@@ -28,6 +28,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _loading = true;
   bool _aiOnline = false;
   String _aiModel = '';
+  Map<String, dynamic> _workload = {};
+  List<dynamic> _focusRecs = [];
   int _currentNavIndex = 0;
 
   @override
@@ -37,30 +39,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _loadData() async {
-    if (!mounted) return;
-    setState(() => _loading = true);
-    try {
-      final results = await Future.wait([
-        _api.getUserTasks(widget.userId),
-        _api.getAiStatus(),
-      ]);
-      final tasks = results[0] as List<dynamic>;
-      final aiStatus = results[1] as Map<String, dynamic>;
-      if (!mounted) return;
-      setState(() {
-        _tasks = tasks
-            .map((t) => TaskModel.fromJson(t))
-            .where((t) => t.status == 'pending')
-            .toList();
-        _aiOnline = aiStatus['status'] == 'online';
-        _aiModel = aiStatus['model'] ?? '';
-        _loading = false;
-      });
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
+  if (!mounted) return;
+  setState(() => _loading = true);
+  try {
+    final results = await Future.wait([
+      _api.getUserTasks(widget.userId),
+      _api.getAiStatus(),
+      _api.getWorkloadAnalysis(widget.userId),      // ADD
+      _api.getFocusRecommendations(widget.userId),  // ADD
+    ]);
+    final tasks = results[0] as List<dynamic>;
+    final aiStatus = results[1] as Map<String, dynamic>;
+    final workload = results[2] as Map<String, dynamic>;
+    final focus = results[3] as Map<String, dynamic>;
 
+    if (!mounted) return;
+    setState(() {
+      _tasks = tasks
+          .map((t) => TaskModel.fromJson(t))
+          .where((t) => t.status == 'pending')
+          .toList();
+      _aiOnline = aiStatus['status'] == 'online';
+      _aiModel = aiStatus['model'] ?? '';
+      _workload = workload;
+      _focusRecs = (focus['recommendations'] as List?) ?? [];
+      _loading = false;
+    });
+  } catch (_) {
+    if (mounted) setState(() => _loading = false);
+  }
+}
   Future<void> _markDone(int taskId, String description) async {
     await _api.updateTaskStatus(taskId, 'done');
     await NotificationService().showNotification(
@@ -127,6 +135,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             SliverToBoxAdapter(child: _buildStatsRow()),
             SliverToBoxAdapter(child: _buildQuickActions()),
             SliverToBoxAdapter(child: _buildTasksHeader()),
+            SliverToBoxAdapter(child: _buildWorkloadBanner()),
+            SliverToBoxAdapter(child: _buildFocusCard()),
             _loading ? _buildSkeletonList() : _buildTaskList(),
             const SliverToBoxAdapter(
                 child: SizedBox(height: AppSpacing.xxl)),
@@ -216,7 +226,102 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
   }
+  Widget _buildWorkloadBanner() {
+  if (_workload.isEmpty) return const SizedBox.shrink();
+  final level = _workload['level'] ?? 'normal';
+  if (level == 'normal') return const SizedBox.shrink();
 
+  final color = level == 'high' ? AppColors.high : AppColors.medium;
+  final warnings = (_workload['warnings'] as List?) ?? [];
+  if (warnings.isEmpty) return const SizedBox.shrink();
+
+  return Padding(
+    padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md, AppSpacing.sm, AppSpacing.md, 0),
+    child: AppCard(
+      color: color.withValues(alpha: 0.07),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.warning_amber_rounded, color: color, size: 16),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  level == 'high' ? 'High Workload' : 'Heads Up',
+                  style: AppTextStyles.labelLarge
+                      .copyWith(color: color),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  warnings.first.toString(),
+                  style: AppTextStyles.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+Widget _buildFocusCard() {
+  if (_focusRecs.isEmpty) return const SizedBox.shrink();
+  final top = _focusRecs.first as Map<String, dynamic>;
+  final risk = (top['delay_risk'] as Map?) ?? {};
+  final riskLevel = risk['risk'] ?? 'unknown';
+  final riskColor = riskLevel == 'high'
+      ? AppColors.high
+      : riskLevel == 'medium'
+          ? AppColors.medium
+          : AppColors.low;
+  final reasons = (top['reasons'] as List?) ?? [];
+
+  return Padding(
+    padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md, AppSpacing.sm, AppSpacing.md, 0),
+    child: AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.auto_awesome_rounded,
+                  color: AppColors.primary, size: 14),
+              const SizedBox(width: 6),
+              Text('UAILM Recommends',
+                  style: AppTextStyles.caption.copyWith(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w600)),
+              const Spacer(),
+              if (riskLevel != 'unknown')
+                AppChip(
+                  label: '$riskLevel risk',
+                  color: riskColor,
+                ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            top['description'] ?? '',
+            style: AppTextStyles.titleMedium,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          if (reasons.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              reasons.take(2).join(' · '),
+              style: AppTextStyles.bodySmall,
+            ),
+          ],
+        ],
+      ),
+    ),
+  );
+}
   Widget _buildStatsRow() {
     final high = _tasks.where((t) => t.priority == 'high').length;
     final medium = _tasks.where((t) => t.priority == 'medium').length;

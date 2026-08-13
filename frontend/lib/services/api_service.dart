@@ -152,4 +152,27 @@ Future<List<dynamic>> getHighPriorityTasks(int userId) async {
       Uri.parse('$baseUrl/api/agent/tasks/high-priority/$userId'));
   return jsonDecode(r.body);
 }
+// ── Intelligence ──────────────────────────────────────────────────
+
+Future<Map<String, dynamic>> getFocusRecommendations(int userId) async {
+  try {
+    final r = await http.get(
+      Uri.parse('$baseUrl/api/intelligence/focus/$userId'),
+    ).timeout(const Duration(seconds: 10));
+    return jsonDecode(r.body);
+  } catch (_) {
+    return {"recommendations": [], "message": "Could not load"};
+  }
+}
+
+Future<Map<String, dynamic>> getWorkloadAnalysis(int userId) async {
+  try {
+    final r = await http.get(
+      Uri.parse('$baseUrl/api/intelligence/workload/$userId'),
+    ).timeout(const Duration(seconds: 10));
+    return jsonDecode(r.body);
+  } catch (_) {
+    return {"level": "unknown", "warnings": []};
+  }
+}
 }

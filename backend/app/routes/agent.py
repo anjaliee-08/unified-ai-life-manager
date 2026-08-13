@@ -1,3 +1,8 @@
+from app.services.intelligence_service import (
+    build_user_profile,
+    get_focus_recommendations,
+    analyze_workload,
+)
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -311,19 +316,35 @@ async def agent_chat(
     # ── Execute tool based on intent ──────────────────────────────
 
     if intent == "QUERY_TODAY":
+        now = datetime.now()
         tasks = tool_get_today_tasks(req.user_id, db)
-        real_data = f"Today's tasks:\n{format_task_list(tasks)}"
+        workload = analyze_workload(req.user_id, db, now)
+        real_data = (
+            f"Today's tasks:\n{format_task_list(tasks)}\n\n"
+            f"Workload: {workload['summary']}\n"
+            f"Warnings: {'; '.join(workload['warnings']) if workload['warnings'] else 'none'}"
+    )
 
     elif intent == "QUERY_FOCUS":
-        high = tool_get_high_priority(req.user_id, db)
-        overdue = tool_get_overdue(req.user_id, db)
-        all_pending = tool_get_all_pending(req.user_id, db)
-        real_data = (
-            f"High priority tasks:\n{format_task_list(high)}\n\n"
-            f"Overdue tasks:\n{format_task_list(overdue)}\n\n"
-            f"All pending ({len(all_pending)} total):\n"
-            f"{format_task_list(all_pending[:5])}"
-        )
+        profile = build_user_profile(req.user_id, db)
+        focus = get_focus_recommendations(req.user_id, db, profile, top_n=3)
+        if not focus["recommendations"]:
+             real_data = "No pending tasks found."
+        else:
+            lines = []
+            for item in focus["recommendations"]:
+                risk = item.get("delay_risk", {})
+                risk_str = f" [delay risk: {risk.get('risk', 'unknown')}]" if risk else ""
+                reasons_str = ", ".join(item["reasons"][:2])
+                lines.append(
+                f"- [{item['priority'].upper()}] {item['description']}"
+                f" (score: {item['score']}{risk_str})"
+                f"\n  Why: {reasons_str}"
+                )
+            real_data = (
+                 f"Intelligently ranked tasks ({focus['message']}):\n"
+                  + "\n".join(lines)
+          )
 
     elif intent == "QUERY_HIGH_PRIORITY":
         tasks = tool_get_high_priority(req.user_id, db)
