@@ -6,7 +6,7 @@ from app.services.intelligence_service import (
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional,List
 from datetime import datetime, date, timedelta
 import json
 import re
@@ -20,12 +20,27 @@ router = APIRouter()
 ollama = OllamaProvider()
 
 # ─── Request/Response Models ──────────────────────────────────────
-
+class CalendarEventData(BaseModel):
+    """Calendar event sent from Flutter to agent"""
+    id: str
+    title: str
+    start: str
+    end: str
+    location: Optional[str] = None
+    description: Optional[str] = None
+    is_all_day: bool = False
+    time_string: Optional[str] = None
+    is_now: bool = False
+    duration_minutes: Optional[int] = None
 class AgentRequest(BaseModel):
     user_id: int
     message: str
     confirm_action: Optional[str] = None  # for destructive confirmations
     confirm_task_id: Optional[int] = None
+    calendar_events: Optional[List[CalendarEventData]] = None
+    confirm_calendar_action: Optional[str] = None
+    confirm_event_id: Optional[str] = None
+    confirm_calendar_id: Optional[str] = None
 
 class AgentResponse(BaseModel):
     response: str
@@ -154,19 +169,23 @@ INTENT_SYSTEM_PROMPT = """You are an intent classifier for a task management AI 
 
 Classify the user's message into EXACTLY ONE of these intents:
 
-QUERY_TODAY - asking about today's tasks
+QUERY_TODAY - asking about today's tasks AND/OR calendar
 QUERY_FOCUS - asking what to focus on or what's most important
 QUERY_HIGH_PRIORITY - asking about high priority tasks
 QUERY_OVERDUE - asking about overdue tasks
-QUERY_TOMORROW - asking about tomorrow's tasks
-QUERY_UPCOMING - asking about upcoming tasks this week
-QUERY_MEETINGS - asking about meetings
+QUERY_TOMORROW - asking about tomorrow's tasks AND/OR calendar
+QUERY_UPCOMING - asking about upcoming tasks/events this week
+QUERY_MEETINGS - asking about meetings or appointments
 QUERY_ALL - general question about all tasks
+QUERY_CALENDAR - asking specifically about calendar events
+QUERY_SCHEDULE_AT - asking about events at a specific time
 
 ACTION_COMPLETE - wants to mark a task as done/complete
 ACTION_DELETE - wants to delete a task
 ACTION_PRIORITY - wants to change task priority
 ACTION_CREATE - wants to create a new task
+ACTION_CREATE_EVENT - wants to create a calendar event
+ACTION_DELETE_EVENT - wants to delete a calendar event
 
 GENERAL - general conversation not related to tasks
 
@@ -176,7 +195,9 @@ Format:
 {
   "intent": "INTENT_NAME",
   "task_reference": "the task they mentioned or null",
+  "event_reference": "the calendar event they mentioned or null",
   "new_priority": "high/medium/low or null",
+  "time_reference": "specific time mentioned or null",
   "confidence": 0.9
 }"""
 
@@ -245,6 +266,13 @@ async def agent_chat(
     req: AgentRequest,
     db: Session = Depends(get_db)
 ):
+    print("========== CALENDAR DEBUG ==========")
+    print("Calendar events received:", len(req.calendar_events or []))
+
+    for event in (req.calendar_events or []):
+        print("EVENT:", event)
+
+    print("====================================")
     """
     Main AI agent endpoint.
     1. Validates user exists
@@ -317,13 +345,18 @@ async def agent_chat(
 
     if intent == "QUERY_TODAY":
         now = datetime.now()
+        today_str = now.strftime("%B %d, %Y")  # e.g. "August 14, 2026"
         tasks = tool_get_today_tasks(req.user_id, db)
         workload = analyze_workload(req.user_id, db, now)
+        cal_events = [e.dict() for e in (req.calendar_events or [])]
+        
         real_data = (
+            f"Today is {today_str}.\n\n"
             f"Today's tasks:\n{format_task_list(tasks)}\n\n"
+            f"{format_calendar_events(cal_events, today_str)}\n\n"
             f"Workload: {workload['summary']}\n"
             f"Warnings: {'; '.join(workload['warnings']) if workload['warnings'] else 'none'}"
-    )
+        )
 
     elif intent == "QUERY_FOCUS":
         profile = build_user_profile(req.user_id, db)
@@ -355,8 +388,16 @@ async def agent_chat(
         real_data = f"Overdue tasks:\n{format_task_list(tasks)}"
 
     elif intent == "QUERY_TOMORROW":
+        from datetime import timedelta
+        tomorrow = datetime.now() + timedelta(days=1)
+        tomorrow_str = tomorrow.strftime("%B %d, %Y")
         tasks = tool_get_due_tomorrow(req.user_id, db)
-        real_data = f"Tasks due tomorrow:\n{format_task_list(tasks)}"
+        cal_events = [e.dict() for e in (req.calendar_events or [])]
+        real_data = (
+            f"Tomorrow is {tomorrow_str}.\n\n"
+            f"Tasks due tomorrow:\n{format_task_list(tasks)}\n\n"
+            f"{format_calendar_events(cal_events, tomorrow_str)}"
+        )
 
     elif intent == "QUERY_UPCOMING":
         tasks = tool_get_upcoming(req.user_id, db)
@@ -364,13 +405,96 @@ async def agent_chat(
 
     elif intent == "QUERY_MEETINGS":
         all_tasks = tool_get_all_pending(req.user_id, db)
-        meetings = [
+        meeting_tasks = [
             t for t in all_tasks
             if any(w in t.description.lower()
                    for w in ["meeting", "call", "standup",
                               "sync", "interview", "appointment"])
         ]
-        real_data = f"Meeting-related tasks:\n{format_task_list(meetings)}"
+        cal_events = [e.dict() for e in (req.calendar_events or [])]
+        now = datetime.now()
+        today_str = now.strftime("%B %d, %Y")
+        real_data = (
+            f"Today is {today_str}.\n\n"
+            f"Meeting-related tasks:\n{format_task_list(meeting_tasks)}\n\n"
+            f"{format_calendar_events(cal_events, today_str)}"
+        )
+    elif intent == "QUERY_CALENDAR":
+        cal_events = [e.dict() for e in (req.calendar_events or [])]
+        if not cal_events:
+            real_data = (
+                "No calendar events were provided. "
+                "Calendar may be empty or permission not granted."
+            )
+        else:
+            real_data = format_calendar_events(cal_events)
+
+    elif intent == "QUERY_SCHEDULE_AT":
+        intent_data_full = await detect_intent(req.message)
+        time_ref = intent_data_full.get("time_reference", "")
+        cal_events = [e.dict() for e in (req.calendar_events or [])]
+
+        if time_ref and cal_events:
+            matching = [
+                e for e in cal_events
+                if time_ref.lower() in e.get('time_string', '').lower()
+                or time_ref in e.get('start', '')
+            ]
+            real_data = (
+                f"Events around {time_ref}:\n"
+                f"{format_calendar_events(matching) if matching else 'none found'}"
+            )
+        else:
+            real_data = (
+                f"Calendar events:\n{format_calendar_events(cal_events)}"
+            )
+
+    elif intent == "ACTION_DELETE_EVENT":
+        event_ref = intent_data.get("event_reference", "")
+        cal_events = [e.dict() for e in (req.calendar_events or [])]
+        matches = find_event_by_reference(cal_events, event_ref or "")
+
+        if not matches:
+            return AgentResponse(
+                response=f"I couldn't find a calendar event matching '{event_ref}'. "
+                         f"Please check your calendar and try again."
+            )
+        elif len(matches) == 1:
+            event = matches[0]
+            return AgentResponse(
+                response=f"I found **'{event['title']}'** "
+                         f"({event.get('time_string', '')}).\n"
+                         f"Are you sure you want to delete it?",
+                requires_confirmation=True,
+                pending_action={
+                    "type": "delete_calendar_event",
+                    "event_id": event['id'],
+                    "calendar_id": event.get('calendar_id', ''),
+                    "event_title": event['title'],
+                }
+            )
+        else:
+            event_list = "\n".join(
+                [f"{i+1}. {e['title']} ({e.get('time_string', '')})"
+                 for i, e in enumerate(matches[:5])]
+            )
+            return AgentResponse(
+                response=f"I found {len(matches)} matching events:\n\n"
+                         f"{event_list}\n\nWhich one did you want to delete?"
+            )
+
+    elif intent == "ACTION_CREATE_EVENT":
+        # Signal Flutter to show event creation UI
+        return AgentResponse(
+            response="I'd love to create a calendar event! "
+                     "Please tell me:\n"
+                     "• Event title\n"
+                     "• Date and time\n"
+                     "• Duration (optional)\n"
+                     "• Location (optional)\n\n"
+                     "For example: 'Create a meeting called Team Sync tomorrow at 3pm for 1 hour'",
+            action_taken="prompt_create_event"
+        )
 
     elif intent == "QUERY_ALL":
         tasks = tool_get_all_pending(req.user_id, db)
@@ -527,3 +651,43 @@ def get_upcoming(user_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="User not found")
     tasks = tool_get_upcoming(user_id, db)
     return [task_to_dict(t) for t in tasks]
+
+def format_calendar_events(events: list, requested_date: str = "") -> str:
+    """Format calendar events for AI context with explicit date labels."""
+    if not events:
+        return "none"
+    
+    date_label = f" (for {requested_date})" if requested_date else ""
+    lines = [f"Calendar events{date_label}:"]
+    
+    for e in events:
+        time_str = e.get('time_string', 'All day')
+        loc = f" @ {e['location']}" if e.get('location') else ""
+        now_str = " [HAPPENING NOW]" if e.get('is_now') else ""
+        
+        # Include explicit date in output so LLM cannot confuse dates
+        date_str = e.get('date_string', '')
+        date_prefix = f"[{date_str}] " if date_str else ""
+        
+        lines.append(
+            f"- {date_prefix}{e['title']} | {time_str}{loc}{now_str}"
+        )
+    
+    return "\n".join(lines)
+def find_event_by_reference(
+    events: list, reference: str
+) -> list:
+    """Find calendar events matching a natural language reference."""
+    if not events or not reference:
+        return []
+    ref_lower = reference.lower()
+    matches = [
+        e for e in events
+        if ref_lower in e.get('title', '').lower()
+        or any(
+            w in e.get('title', '').lower()
+            for w in ref_lower.split()
+            if len(w) > 2
+        )
+    ]
+    return matches

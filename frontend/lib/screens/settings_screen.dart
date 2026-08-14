@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
+import '../services/calendar_service.dart';
 import '../utils/app_theme.dart';
 import 'login_screen.dart';
 
@@ -23,11 +24,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _aiOnline = false;
   String _aiModel = '';
   bool _loading = true;
+  bool _calendarEnabled = false;
 
   @override
   void initState() {
     super.initState();
     _loadStatus();
+    _checkCalendarPermission();
   }
 
   Future<void> _loadStatus() async {
@@ -39,6 +42,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _loading = false;
     });
   }
+  Future<void> _checkCalendarPermission() async {
+  final granted = await CalendarService().checkPermission();
+  if (mounted) setState(() => _calendarEnabled = granted);
+}
+
+Future<void> _requestCalendarPermission() async {
+  final granted = await CalendarService().requestPermission();
+  if (mounted) setState(() => _calendarEnabled = granted);
+}
 
   Future<void> _logout() async {
     final confirmed = await _showConfirmDialog(
@@ -175,7 +187,56 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ]),
                 const SizedBox(height: AppSpacing.md),
-
+                const SizedBox(height: AppSpacing.md),
+_section('Integrations', [
+  GestureDetector(
+    onTap: _calendarEnabled ? null : _requestCalendarPermission,
+    child: AppCard(
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppColors.accent.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+            ),
+            child: const Icon(Icons.calendar_month_rounded,
+                color: AppColors.accent, size: 16),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Calendar',
+                    style: AppTextStyles.bodyLarge),
+                Text(
+                  _calendarEnabled
+                      ? 'Connected · UAILM can read your calendar'
+                      : 'Tap to enable calendar access',
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: _calendarEnabled
+                        ? AppColors.accent
+                        : AppColors.textMuted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Icon(
+            _calendarEnabled
+                ? Icons.check_circle_rounded
+                : Icons.arrow_forward_ios_rounded,
+            color: _calendarEnabled
+                ? AppColors.accent
+                : AppColors.textMuted,
+            size: 16,
+          ),
+        ],
+      ),
+    ),
+  ),
+]),
                 // About
                 _section('About', [
                   _infoRow(

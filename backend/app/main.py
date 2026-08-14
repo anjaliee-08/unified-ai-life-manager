@@ -4,6 +4,7 @@ from app.database import engine, Base
 from app.routes import auth, tasks, ai
 from app.routes import agent
 from app.routes import intelligence
+from app.routes import calendar as calendar_router
 
 Base.metadata.create_all(bind=engine)
 
@@ -29,6 +30,11 @@ app.include_router(
     intelligence.router,
     prefix="/api/intelligence",
     tags=["Intelligence"]
+)
+app.include_router(
+    calendar_router.router,
+    prefix="/api/calendar",
+    tags=["Calendar"]
 )
 @app.get("/")
 async def root():

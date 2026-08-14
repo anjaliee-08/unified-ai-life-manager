@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../utils/app_theme.dart';
+import '../services/calendar_service.dart';
+import '../models/calendar_event_model.dart';
 
 class ChatMessage {
   final String text;
@@ -38,14 +40,77 @@ class _ChatScreenState extends State<ChatScreen> {
   final ScrollController _scrollController = ScrollController();
   final List<ChatMessage> _messages = [];
   bool _loading = false;
-
+  final CalendarService _calendar = CalendarService();
+  bool _calendarEnabled = false;
   // Pending destructive action waiting for confirmation
   Map<String, dynamic>? _pendingAction;
 
   @override
-  void initState() {
-    super.initState();
-    _addWelcome();
+void initState() {
+  super.initState();
+  _addWelcome();
+  _initCalendar();
+}
+
+Future<void> _initCalendar() async {
+  final granted = await _calendar.checkPermission();
+  if (mounted) setState(() => _calendarEnabled = granted);
+}
+/// Extract explicit date from message like "August 14", "Aug 17", "17th"
+  DateTime? _parseDateFromMessage(String message) {
+    final lower = message.toLowerCase();
+    final now = DateTime.now();
+
+    // Month name + day: "August 14", "aug 17"
+    final monthMap = {
+      'january': 1, 'jan': 1,
+      'february': 2, 'feb': 2,
+      'march': 3, 'mar': 3,
+      'april': 4, 'apr': 4,
+      'may': 5,
+      'june': 6, 'jun': 6,
+      'july': 7, 'jul': 7,
+      'august': 8, 'aug': 8,
+      'september': 9, 'sep': 9, 'sept': 9,
+      'october': 10, 'oct': 10,
+      'november': 11, 'nov': 11,
+      'december': 12, 'dec': 12,
+    };
+
+    for (final entry in monthMap.entries) {
+      final pattern = RegExp(
+        r'\b' + entry.key + r'[a-z]*\s+(\d{1,2})\b',
+        caseSensitive: false,
+      );
+      final match = pattern.firstMatch(lower);
+      if (match != null) {
+        final day = int.tryParse(match.group(1) ?? '');
+        if (day != null && day >= 1 && day <= 31) {
+          int year = now.year;
+          final candidate = DateTime(year, entry.value, day);
+          // If this date is more than 30 days in the past,
+          // assume next year
+          if (candidate.isBefore(
+              now.subtract(const Duration(days: 30)))) {
+            year = now.year + 1;
+          }
+          return DateTime(year, entry.value, day);
+        }
+      }
+    }
+
+    // ISO date in message: "2026-08-17"
+    final isoPattern = RegExp(r'\b(\d{4})-(\d{2})-(\d{2})\b');
+    final isoMatch = isoPattern.firstMatch(message);
+    if (isoMatch != null) {
+      return DateTime(
+        int.parse(isoMatch.group(1)!),
+        int.parse(isoMatch.group(2)!),
+        int.parse(isoMatch.group(3)!),
+      );
+    }
+
+    return null; // No explicit date found
   }
 
   void _addWelcome() {
@@ -68,126 +133,194 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _sendMessage([String? overrideText]) async {
-    final text = (overrideText ?? _controller.text).trim();
-    if (text.isEmpty || _loading) return;
+  final text = (overrideText ?? _controller.text).trim();
+  if (text.isEmpty || _loading) return;
+  if (overrideText == null) _controller.clear();
 
-    if (overrideText == null) {
-      _controller.clear();
+  setState(() {
+    _messages.add(ChatMessage(text: text, isUser: true));
+    _loading = true;
+  });
+  _scrollToBottom();
+
+  try {
+    // Fetch calendar events if permission granted
+    List<Map<String, dynamic>> calendarEvents = [];
+    if (_calendarEnabled) {
+      try {
+        List<CalendarEventModel> events = [];
+        final msgLower = text.toLowerCase();
+
+        // ── Detect explicit date in message ──────────────────────
+        // Check for "August 14", "Aug 17", "August 15" etc.
+        final DateTime? explicitDate =
+            _parseDateFromMessage(text);
+
+        if (explicitDate != null) {
+          // User asked about a specific date — fetch ONLY that date
+          events = await _calendar.getEventsForDate(explicitDate);
+        } else if (msgLower.contains('tomorrow')) {
+          events = await _calendar.getTomorrowEvents();
+        } else if (msgLower.contains('this week') ||
+            msgLower.contains('upcoming') ||
+            msgLower.contains('next few days')) {
+          events = await _calendar.getUpcomingEvents(days: 7);
+        } else if (msgLower.contains('today') ||
+            msgLower.contains('right now') ||
+            msgLower.contains('schedule') ||
+            msgLower.contains('meeting') ||
+            msgLower.contains('event') ||
+            msgLower.contains('calendar') ||
+            msgLower.contains('what do i have') ||
+            msgLower.contains('what time')) {
+          // Default for time-sensitive queries: today only
+          events = await _calendar.getTodayEvents();
+        } else {
+          // Fallback: today + tomorrow
+          final today = await _calendar.getTodayEvents();
+          final tomorrow = await _calendar.getTomorrowEvents();
+          events = [...today, ...tomorrow];
+        }
+
+        calendarEvents = _calendar.eventsToJson(events);
+        debugPrint(
+           'ChatScreen: sending ${calendarEvents.length} events to agent'
+          );
+        for (final e in calendarEvents) {
+        debugPrint(
+         'ChatScreen: → "${e['title']}" '
+         'date=${e['date_year']}-${e['date_month']}-${e['date_day']} '
+         'time=${e['time_string']} '
+         'start=${e['start']}'
+            );
+           }
+
+        // Debug log — remove before production
+        debugPrint(
+          'Calendar: fetched ${events.length} events for message: "$text"'
+        );
+        for (final e in events) {
+          debugPrint(
+            '  Event: ${e.title} | ${e.dateString} | ${e.timeString}'
+          );
+        }
+      } catch (e) {
+        debugPrint('Calendar fetch error: $e');
+        calendarEvents = [];
+      }
     }
+
+    final result = await _api.agentChatWithCalendar(
+      userId: widget.userId,
+      message: text,
+      calendarEvents: calendarEvents,
+    );
+
+    if (!mounted) return;
+
+    final response = result['response'] ?? 'No response';
+    final requiresConfirmation =
+        result['requires_confirmation'] ?? false;
+    final pendingAction =
+        result['pending_action'] as Map<String, dynamic>?;
 
     setState(() {
-      _messages.add(ChatMessage(text: text, isUser: true));
-      _loading = true;
+      _messages.add(ChatMessage(
+        text: response,
+        isUser: false,
+        isConfirmation: requiresConfirmation,
+        pendingAction: pendingAction,
+      ));
+      _loading = false;
+      if (requiresConfirmation && pendingAction != null) {
+        _pendingAction = pendingAction;
+      }
     });
-    _scrollToBottom();
-
-    try {
-      final result = await _api.agentChat(
-        userId: widget.userId,
-        message: text,
-      );
-
-      if (!mounted) return;
-
-      final response = result['response'] ?? 'No response';
-      final requiresConfirmation =
-          result['requires_confirmation'] ?? false;
-      final pendingAction =
-          result['pending_action'] as Map<String, dynamic>?;
-
-      setState(() {
-        _messages.add(ChatMessage(
-          text: response,
-          isUser: false,
-          isConfirmation: requiresConfirmation,
-          pendingAction: pendingAction,
-        ));
-        _loading = false;
-
-        // Store pending action
-        if (requiresConfirmation && pendingAction != null) {
-          _pendingAction = pendingAction;
-        }
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _messages.add(ChatMessage(
-          text: '⚠️ Cannot reach backend. Is it running?',
-          isUser: false,
-        ));
-        _loading = false;
-      });
-    }
-    _scrollToBottom();
+  } catch (e) {
+    if (!mounted) return;
+    setState(() {
+      _messages.add(ChatMessage(
+        text: '⚠️ Cannot reach backend. Is it running?',
+        isUser: false,
+      ));
+      _loading = false;
+    });
   }
+  _scrollToBottom();
+}
 
   Future<void> _confirmAction(String action) async {
-    if (_pendingAction == null) return;
+  // Find last pending action
+  Map<String, dynamic>? lastPending;
+  for (int i = _messages.length - 1; i >= 0; i--) {
+    if (_messages[i].pendingAction != null) {
+      lastPending = _messages[i].pendingAction;
+      break;
+    }
+  }
+  if (lastPending == null) return;
 
-    final taskId = _pendingAction!['task_id'] as int?;
-    setState(() {
-      _pendingAction = null;
-      _loading = true;
-      _messages.add(ChatMessage(
-        text: action == 'yes' ? 'Yes, go ahead.' : 'No, cancel.',
-        isUser: true,
-      ));
-    });
-    _scrollToBottom();
+  setState(() {
+    _loading = true;
+    _messages.add(ChatMessage(
+      text: action == 'yes' ? 'Yes, go ahead.' : 'No, cancel.',
+      isUser: true,
+    ));
+    _pendingAction = null;
+  });
+  _scrollToBottom();
 
-    try {
-      final actionType = action == 'yes'
-          ? _pendingAction == null
-              ? 'cancel'
-              : (_messages
-                      .lastWhere((m) => m.pendingAction != null,
-                          orElse: () => ChatMessage(
-                              text: '', isUser: false))
-                      .pendingAction?['type'] ??
-                  'cancel')
-          : 'cancel';
+  try {
+    String responseText = '';
+    final actionType = lastPending['type'] ?? '';
 
-      // Get the last pending action type from messages
-      String confirmType = 'cancel';
-      int? confirmId;
-      for (int i = _messages.length - 1; i >= 0; i--) {
-        if (_messages[i].pendingAction != null) {
-          confirmType = action == 'yes'
-              ? (_messages[i].pendingAction!['type'] ?? 'cancel')
-              : 'cancel';
-          confirmId = _messages[i].pendingAction!['task_id'];
-          break;
-        }
+    if (action == 'no') {
+      responseText = 'No problem! Action cancelled.';
+    } else if (actionType == 'delete_calendar_event') {
+      // Flutter executes calendar delete directly
+      final eventId = lastPending['event_id'] ?? '';
+      final calendarId = lastPending['calendar_id'] ?? '';
+      final title = lastPending['event_title'] ?? 'event';
+
+      if (eventId.isNotEmpty && calendarId.isNotEmpty) {
+        final success =
+            await _calendar.deleteEvent(eventId, calendarId);
+        responseText = success
+            ? "✅ Done! I've deleted '$title' from your calendar."
+            : "⚠️ Could not delete the event. Please try from your calendar app.";
+      } else {
+        responseText = '⚠️ Could not identify the event to delete.';
       }
-
-      final result = await _api.agentChat(
+    } else {
+      // Task actions — go through backend
+      final taskId = lastPending['task_id'] as int?;
+      final result = await _api.agentChatWithCalendar(
         userId: widget.userId,
         message: action == 'yes' ? 'confirm' : 'cancel',
-        confirmAction: action == 'yes' ? confirmType : 'cancel',
-        confirmTaskId: action == 'yes' ? confirmId : null,
+        confirmAction: action == 'yes' ? actionType : 'cancel',
+        confirmTaskId: action == 'yes' ? taskId : null,
       );
-
-      if (!mounted) return;
-      setState(() {
-        _messages.add(ChatMessage(
-          text: result['response'] ?? 'Done.',
-          isUser: false,
-        ));
-        _loading = false;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _messages.add(ChatMessage(
-          text: '⚠️ Action failed. Please try again.',
-          isUser: false,
-        ));
-        _loading = false;
-      });
+      responseText = result['response'] ?? 'Done.';
     }
-    _scrollToBottom();
+
+    if (!mounted) return;
+    setState(() {
+      _messages.add(
+          ChatMessage(text: responseText, isUser: false));
+      _loading = false;
+    });
+  } catch (_) {
+    if (!mounted) return;
+    setState(() {
+      _messages.add(ChatMessage(
+        text: '⚠️ Action failed. Please try again.',
+        isUser: false,
+      ));
+      _loading = false;
+    });
   }
+  _scrollToBottom();
+}
 
   void _scrollToBottom() {
     Future.delayed(const Duration(milliseconds: 100), () {
