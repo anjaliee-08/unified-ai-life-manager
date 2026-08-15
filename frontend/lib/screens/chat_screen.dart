@@ -3,6 +3,8 @@ import '../services/api_service.dart';
 import '../utils/app_theme.dart';
 import '../services/calendar_service.dart';
 import '../models/calendar_event_model.dart';
+import '../services/email_service.dart';
+import '../models/email_model.dart';
 
 class ChatMessage {
   final String text;
@@ -42,19 +44,27 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _loading = false;
   final CalendarService _calendar = CalendarService();
   bool _calendarEnabled = false;
+  final EmailService _email = EmailService();
+  bool _emailConnected = false;
   // Pending destructive action waiting for confirmation
   Map<String, dynamic>? _pendingAction;
+
 
   @override
 void initState() {
   super.initState();
   _addWelcome();
   _initCalendar();
+  _initEmail();
 }
 
 Future<void> _initCalendar() async {
   final granted = await _calendar.checkPermission();
   if (mounted) setState(() => _calendarEnabled = granted);
+}
+Future<void> _initEmail() async {
+  final ok = await _email.checkSignedIn();
+  if (mounted) setState(() => _emailConnected = ok);
 }
 /// Extract explicit date from message like "August 14", "Aug 17", "17th"
   DateTime? _parseDateFromMessage(String message) {
@@ -145,75 +155,94 @@ Future<void> _initCalendar() async {
 
   try {
     // Fetch calendar events if permission granted
+    // ── Fetch calendar events ──────────────────────────────────
     List<Map<String, dynamic>> calendarEvents = [];
     if (_calendarEnabled) {
       try {
         List<CalendarEventModel> events = [];
         final msgLower = text.toLowerCase();
-
-        // ── Detect explicit date in message ──────────────────────
-        // Check for "August 14", "Aug 17", "August 15" etc.
-        final DateTime? explicitDate =
-            _parseDateFromMessage(text);
+        final DateTime? explicitDate = _parseDateFromMessage(text);
 
         if (explicitDate != null) {
-          // User asked about a specific date — fetch ONLY that date
           events = await _calendar.getEventsForDate(explicitDate);
         } else if (msgLower.contains('tomorrow')) {
           events = await _calendar.getTomorrowEvents();
         } else if (msgLower.contains('this week') ||
-            msgLower.contains('upcoming') ||
-            msgLower.contains('next few days')) {
+            msgLower.contains('upcoming')) {
           events = await _calendar.getUpcomingEvents(days: 7);
         } else if (msgLower.contains('today') ||
-            msgLower.contains('right now') ||
-            msgLower.contains('schedule') ||
             msgLower.contains('meeting') ||
             msgLower.contains('event') ||
             msgLower.contains('calendar') ||
+            msgLower.contains('schedule') ||
             msgLower.contains('what do i have') ||
             msgLower.contains('what time')) {
-          // Default for time-sensitive queries: today only
           events = await _calendar.getTodayEvents();
         } else {
-          // Fallback: today + tomorrow
           final today = await _calendar.getTodayEvents();
           final tomorrow = await _calendar.getTomorrowEvents();
           events = [...today, ...tomorrow];
         }
-
         calendarEvents = _calendar.eventsToJson(events);
-        debugPrint(
-           'ChatScreen: sending ${calendarEvents.length} events to agent'
-          );
-        for (final e in calendarEvents) {
-        debugPrint(
-         'ChatScreen: → "${e['title']}" '
-         'date=${e['date_year']}-${e['date_month']}-${e['date_day']} '
-         'time=${e['time_string']} '
-         'start=${e['start']}'
-            );
-           }
-
-        // Debug log — remove before production
-        debugPrint(
-          'Calendar: fetched ${events.length} events for message: "$text"'
-        );
-        for (final e in events) {
-          debugPrint(
-            '  Event: ${e.title} | ${e.dateString} | ${e.timeString}'
-          );
-        }
       } catch (e) {
         debugPrint('Calendar fetch error: $e');
-        calendarEvents = [];
       }
     }
 
-    final result = await _api.agentChatWithCalendar(
+    // ── Fetch emails ───────────────────────────────────────────
+    List<Map<String, dynamic>> emailPayload = [];
+    if (_emailConnected) {
+      try {
+        final msgLower = text.toLowerCase();
+        List<EmailModel> fetchedEmails = [];
+
+        // Determine which emails to fetch based on query
+        if (msgLower.contains('unread')) {
+          fetchedEmails = await _email.fetchUnreadEmails();
+        } else if (msgLower.contains('important') ||
+            msgLower.contains('urgent')) {
+          fetchedEmails = await _email.fetchImportantEmails();
+        } else if (msgLower.contains('today') &&
+            (msgLower.contains('email') ||
+                msgLower.contains('mail') ||
+                msgLower.contains('inbox'))) {
+          fetchedEmails = await _email.fetchTodayEmails();
+        } else if (msgLower.contains('from ')) {
+          // Extract sender name after "from"
+          final fromMatch =
+              RegExp(r'from\s+(\w[\w\s]*)', caseSensitive: false)
+                  .firstMatch(text);
+          final sender = fromMatch?.group(1)?.trim() ?? '';
+          if (sender.isNotEmpty) {
+            fetchedEmails = await _email.fetchFromSender(sender);
+          } else {
+            fetchedEmails = await _email.fetchEmails();
+          }
+        } else if (msgLower.contains('email') ||
+            msgLower.contains('mail') ||
+            msgLower.contains('inbox') ||
+            msgLower.contains('professor') ||
+            msgLower.contains('received')) {
+          // Any email-related query — fetch recent
+          fetchedEmails = await _email.fetchEmails(maxResults: 10);
+        }
+        // For non-email queries, don't fetch emails at all
+        // to avoid unnecessary API calls
+
+        emailPayload = _email.emailsToJson(fetchedEmails);
+        debugPrint(
+            'ChatScreen: fetched ${fetchedEmails.length} emails');
+      } catch (e) {
+        debugPrint('Email fetch error: $e');
+      }
+    }
+
+    // ── Send to agent ──────────────────────────────────────────
+    final result = await _api.agentChatWithContext(
       userId: widget.userId,
       message: text,
       calendarEvents: calendarEvents,
+      emails: emailPayload,
     );
 
     if (!mounted) return;
@@ -294,7 +323,7 @@ Future<void> _initCalendar() async {
     } else {
       // Task actions — go through backend
       final taskId = lastPending['task_id'] as int?;
-      final result = await _api.agentChatWithCalendar(
+      final result = await _api.agentChatWithContext(
         userId: widget.userId,
         message: action == 'yes' ? 'confirm' : 'cancel',
         confirmAction: action == 'yes' ? actionType : 'cancel',

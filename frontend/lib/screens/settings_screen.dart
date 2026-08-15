@@ -4,7 +4,7 @@ import '../services/api_service.dart';
 import '../services/calendar_service.dart';
 import '../utils/app_theme.dart';
 import 'login_screen.dart';
-
+import '../services/email_service.dart';
 class SettingsScreen extends StatefulWidget {
   final int userId;
   final String userName;
@@ -25,12 +25,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _aiModel = '';
   bool _loading = true;
   bool _calendarEnabled = false;
-
+  bool _emailConnected = false;
+  String _connectedEmail = '';
   @override
   void initState() {
     super.initState();
     _loadStatus();
     _checkCalendarPermission();
+    _checkEmailStatus();
   }
 
   Future<void> _loadStatus() async {
@@ -50,6 +52,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
 Future<void> _requestCalendarPermission() async {
   final granted = await CalendarService().requestPermission();
   if (mounted) setState(() => _calendarEnabled = granted);
+}
+Future<void> _checkEmailStatus() async {
+  final ok = await EmailService().checkSignedIn();
+  if (mounted) {
+    setState(() {
+      _emailConnected = ok;
+      _connectedEmail = EmailService().connectedEmail ?? '';
+    });
+  }
+}
+
+Future<void> _connectEmail() async {
+  final ok = await EmailService().signIn();
+  if (mounted) {
+    setState(() {
+      _emailConnected = ok;
+      _connectedEmail = EmailService().connectedEmail ?? '';
+    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(ok
+          ? 'Gmail connected ✓'
+          : 'Could not connect Gmail'),
+      backgroundColor:
+          ok ? AppColors.success : AppColors.error,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.md)),
+      margin: const EdgeInsets.all(AppSpacing.md),
+    ));
+  }
+}
+
+Future<void> _disconnectEmail() async {
+  await EmailService().signOut();
+  if (mounted) {
+    setState(() {
+      _emailConnected = false;
+      _connectedEmail = '';
+    });
+  }
 }
 
   Future<void> _logout() async {
@@ -187,7 +229,6 @@ Future<void> _requestCalendarPermission() async {
                   ),
                 ]),
                 const SizedBox(height: AppSpacing.md),
-                const SizedBox(height: AppSpacing.md),
 _section('Integrations', [
   GestureDetector(
     onTap: _calendarEnabled ? null : _requestCalendarPermission,
@@ -208,7 +249,7 @@ _section('Integrations', [
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Calendar',
+                const Text('Calendar',
                     style: AppTextStyles.bodyLarge),
                 Text(
                   _calendarEnabled
@@ -236,6 +277,60 @@ _section('Integrations', [
       ),
     ),
   ),
+  const SizedBox(height: AppSpacing.sm),
+GestureDetector(
+  onTap: _emailConnected
+      ? _disconnectEmail
+      : _connectEmail,
+  child: AppCard(
+    child: Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.redAccent
+                .withValues(alpha: 0.1),
+            borderRadius:
+                BorderRadius.circular(AppRadius.sm),
+          ),
+          child: const Icon(Icons.email_rounded,
+              color: Colors.redAccent, size: 16),
+        ),
+        const SizedBox(width: AppSpacing.md),
+        Expanded(
+          child: Column(
+            crossAxisAlignment:
+                CrossAxisAlignment.start,
+            children: [
+             const Text('Gmail',
+                  style: AppTextStyles.bodyLarge),
+              Text(
+                _emailConnected
+                    ? 'Connected · $_connectedEmail'
+                    : 'Tap to connect Gmail (read-only)',
+                style: AppTextStyles.bodySmall
+                    .copyWith(
+                  color: _emailConnected
+                      ? AppColors.success
+                      : AppColors.textMuted,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Icon(
+          _emailConnected
+              ? Icons.check_circle_rounded
+              : Icons.arrow_forward_ios_rounded,
+          color: _emailConnected
+              ? AppColors.success
+              : AppColors.textMuted,
+          size: 16,
+        ),
+      ],
+    ),
+  ),
+),
 ]),
                 // About
                 _section('About', [
@@ -274,7 +369,7 @@ _section('Integrations', [
                 const SizedBox(height: AppSpacing.xl),
 
                 // Footer
-                Center(
+                const Center(
                   child: Column(
                     children: [
                       const Icon(Icons.auto_awesome_rounded,

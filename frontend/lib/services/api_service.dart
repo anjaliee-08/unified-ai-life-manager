@@ -231,4 +231,39 @@ Future<Map<String, dynamic>> syncCalendarEvents({
     return {'status': 'error'};
   }
 }
+Future<Map<String, dynamic>> agentChatWithContext({
+  required int userId,
+  required String message,
+  List<Map<String, dynamic>> calendarEvents = const [],
+  List<Map<String, dynamic>> emails = const [],
+  String? confirmAction,
+  int? confirmTaskId,
+  String? confirmCalendarAction,
+  String? confirmEventId,
+  String? confirmCalendarId,
+}) async {
+  final body = <String, dynamic>{
+    'user_id': userId,
+    'message': message,
+    'calendar_events': calendarEvents,
+    'emails': emails,
+  };
+  if (confirmAction != null) body['confirm_action'] = confirmAction;
+  if (confirmTaskId != null) body['confirm_task_id'] = confirmTaskId;
+  if (confirmCalendarAction != null) {
+    body['confirm_calendar_action'] = confirmCalendarAction;
+  }
+  if (confirmEventId != null) body['confirm_event_id'] = confirmEventId;
+  if (confirmCalendarId != null) {
+    body['confirm_calendar_id'] = confirmCalendarId;
+  }
+
+  final response = await http.post(
+    Uri.parse('$baseUrl/api/agent/chat'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode(body),
+  ).timeout(const Duration(seconds: 90));
+
+  return jsonDecode(response.body);
+}
 }

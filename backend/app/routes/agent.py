@@ -32,6 +32,19 @@ class CalendarEventData(BaseModel):
     time_string: Optional[str] = None
     is_now: bool = False
     duration_minutes: Optional[int] = None
+class EmailData(BaseModel):
+    """Email metadata sent from Flutter to agent — read-only"""
+    id: str
+    sender: str
+    sender_email: str
+    subject: str
+    snippet: str
+    received_at: str
+    is_unread: bool
+    is_important: bool
+    is_today: bool
+    time_string: str
+    labels: list = []
 class AgentRequest(BaseModel):
     user_id: int
     message: str
@@ -41,6 +54,7 @@ class AgentRequest(BaseModel):
     confirm_calendar_action: Optional[str] = None
     confirm_event_id: Optional[str] = None
     confirm_calendar_id: Optional[str] = None
+    emails: Optional[List[EmailData]] = None
 
 class AgentResponse(BaseModel):
     response: str
@@ -180,6 +194,13 @@ QUERY_ALL - general question about all tasks
 QUERY_CALENDAR - asking specifically about calendar events
 QUERY_SCHEDULE_AT - asking about events at a specific time
 
+QUERY_EMAIL_ALL - asking about recent emails generally
+QUERY_EMAIL_TODAY - asking about today's emails
+QUERY_EMAIL_UNREAD - asking about unread emails
+QUERY_EMAIL_SENDER - asking about emails from a specific person
+QUERY_EMAIL_SUBJECT - asking about emails on a specific topic
+QUERY_EMAIL_IMPORTANT - asking about important emails
+
 ACTION_COMPLETE - wants to mark a task as done/complete
 ACTION_DELETE - wants to delete a task
 ACTION_PRIORITY - wants to change task priority
@@ -196,11 +217,12 @@ Format:
   "intent": "INTENT_NAME",
   "task_reference": "the task they mentioned or null",
   "event_reference": "the calendar event they mentioned or null",
+  "email_sender_reference": "sender name/email they mentioned or null",
+  "email_subject_reference": "subject keyword they mentioned or null",
   "new_priority": "high/medium/low or null",
   "time_reference": "specific time mentioned or null",
   "confidence": 0.9
 }"""
-
 async def detect_intent(message: str) -> dict:
     """Use Qwen to classify intent from user message."""
     try:
@@ -428,7 +450,67 @@ async def agent_chat(
             )
         else:
             real_data = format_calendar_events(cal_events)
+    elif intent == "QUERY_EMAIL_ALL":
+        emails = [e.dict() for e in (req.emails or [])]
+        if not emails:
+            real_data = (
+                "No emails were provided. "
+                "Email integration may not be connected."
+            )
+        else:
+            real_data = format_emails(emails, "recent")
 
+    elif intent == "QUERY_EMAIL_TODAY":
+        emails = [e.dict() for e in (req.emails or [])]
+        today_emails = [e for e in emails if e.get('is_today')]
+        real_data = format_emails(
+            today_emails if today_emails else emails,
+            "today" if today_emails else "recent — no emails today"
+        )
+
+    elif intent == "QUERY_EMAIL_UNREAD":
+        emails = [e.dict() for e in (req.emails or [])]
+        unread = [e for e in emails if e.get('is_unread')]
+        real_data = format_emails(unread, "unread")
+
+    elif intent == "QUERY_EMAIL_IMPORTANT":
+        emails = [e.dict() for e in (req.emails or [])]
+        important = [e for e in emails if e.get('is_important')]
+        real_data = format_emails(important, "important")
+
+    elif intent == "QUERY_EMAIL_SENDER":
+        sender_ref = intent_data.get("email_sender_reference", "")
+        emails = [e.dict() for e in (req.emails or [])]
+        if sender_ref:
+            ref_lower = sender_ref.lower()
+            matched = [
+                e for e in emails
+                if ref_lower in e.get('sender', '').lower()
+                or ref_lower in e.get('sender_email', '').lower()
+            ]
+        else:
+            matched = emails
+        real_data = format_emails(
+            matched,
+            f"from '{sender_ref}'" if sender_ref else "all senders"
+        )
+
+    elif intent == "QUERY_EMAIL_SUBJECT":
+        subject_ref = intent_data.get("email_subject_reference", "")
+        emails = [e.dict() for e in (req.emails or [])]
+        if subject_ref:
+            ref_lower = subject_ref.lower()
+            matched = [
+                e for e in emails
+                if ref_lower in e.get('subject', '').lower()
+                or ref_lower in e.get('snippet', '').lower()
+            ]
+        else:
+            matched = emails
+        real_data = format_emails(
+            matched,
+            f"about '{subject_ref}'" if subject_ref else "all"
+        )
     elif intent == "QUERY_SCHEDULE_AT":
         intent_data_full = await detect_intent(req.message)
         time_ref = intent_data_full.get("time_reference", "")
@@ -599,12 +681,15 @@ async def agent_chat(
         )
 
     else:
-        # GENERAL — give context about all tasks
+        # GENERAL — give context about tasks + any emails provided
         tasks = tool_get_all_pending(req.user_id, db)
+        emails = [e.dict() for e in (req.emails or [])]
         real_data = (
             f"User's pending tasks ({len(tasks)}):\n"
             f"{format_task_list(tasks)}"
         )
+        if emails:
+            real_data += f"\n\nRecent emails:\n{format_emails(emails[:3])}"
 
     # ── Generate grounded response ────────────────────────────────
     response_text = await generate_response(
@@ -673,6 +758,33 @@ def format_calendar_events(events: list, requested_date: str = "") -> str:
             f"- {date_prefix}{e['title']} | {time_str}{loc}{now_str}"
         )
     
+    return "\n".join(lines)
+def format_emails(emails: list, filter_desc: str = "") -> str:
+    """Format email list for AI context."""
+    if not emails:
+        return "none"
+
+    desc = f" ({filter_desc})" if filter_desc else ""
+    lines = [f"Emails{desc}:"]
+
+    for e in emails:
+        unread = "UNREAD " if e.get('is_unread') else ""
+        important = "⭐ " if e.get('is_important') else ""
+        subject = e.get('subject', '(no subject)')
+        sender = e.get('sender', 'Unknown')
+        snippet = e.get('snippet', '')
+        time_str = e.get('time_string', '')
+
+        # Truncate snippet to avoid bloating context
+        if len(snippet) > 120:
+            snippet = snippet[:120] + '...'
+
+        lines.append(
+            f"- {unread}{important}From: {sender} | "
+            f"Subject: {subject} | {time_str}\n"
+            f"  Preview: {snippet}"
+        )
+
     return "\n".join(lines)
 def find_event_by_reference(
     events: list, reference: str

@@ -24,6 +24,8 @@ dependencies:
   flutter_local_notifications: ^17.0.0 # ADD THIS
   timezone: ^0.9.4
   device_calendar: ^4.3.2
+  google_sign_in: ^7.2.0
+  googleapis: ^16.0.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -31,3 +33,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+google_sign_in: ^6.2.1
+googleapis: ^13.2.0
+flutter_secure_storage: ^9.0.0

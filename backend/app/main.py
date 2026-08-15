@@ -5,7 +5,7 @@ from app.routes import auth, tasks, ai
 from app.routes import agent
 from app.routes import intelligence
 from app.routes import calendar as calendar_router
-
+from app.routes import email_route
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
@@ -36,6 +36,12 @@ app.include_router(
     prefix="/api/calendar",
     tags=["Calendar"]
 )
+app.include_router(
+    email_route.router,
+    prefix="/api/email",
+    tags=["Email"]
+)
+
 @app.get("/")
 async def root():
     return {"app": "UAILM", "status": "running"}
