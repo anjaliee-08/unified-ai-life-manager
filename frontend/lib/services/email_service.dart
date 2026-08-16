@@ -6,8 +6,7 @@ import 'package:http/http.dart' as http;
 import '../models/email_model.dart';
 
 // ── Gmail scope ────────────────────────────────────────────────────
-const _gmailReadonlyScope =
-    'https://www.googleapis.com/auth/gmail.readonly';
+const _gmailReadonlyScope = 'https://www.googleapis.com/auth/gmail.readonly';
 
 // ── Authenticated HTTP client ──────────────────────────────────────
 /// Injects the OAuth access token into every request header.
@@ -52,13 +51,15 @@ class EmailService {
     try {
       // 7.x: initialize() sets up the plugin.
       // clientId is not required on Android (uses google-services.json).
-      await _signIn.initialize();
+      await _signIn.initialize(
+        serverClientId:
+            '446937194320-13i4cbsbn6cdd8uurac70te20eu49hn0.apps.googleusercontent.com',
+      );
 
       // Listen to authentication state changes
       _authSub = _signIn.authenticationEvents.listen(
         _onAuthEvent,
-        onError: (e) =>
-            debugPrint('EmailService: auth stream error: $e'),
+        onError: (e) => debugPrint('EmailService: auth stream error: $e'),
       );
 
       debugPrint('EmailService: initialized');
@@ -71,8 +72,7 @@ class EmailService {
   void _onAuthEvent(GoogleSignInAuthenticationEvent event) {
     if (event is GoogleSignInAuthenticationEventSignIn) {
       _currentUser = event.user;
-      debugPrint(
-          'EmailService: signed in → ${event.user.email}');
+      debugPrint('EmailService: signed in → ${event.user.email}');
     } else if (event is GoogleSignInAuthenticationEventSignOut) {
       _currentUser = null;
       debugPrint('EmailService: signed out');
@@ -107,8 +107,7 @@ class EmailService {
           _currentUser = event.user;
           timer.cancel();
           if (!completer.isCompleted) completer.complete(true);
-        } else if (event
-            is GoogleSignInAuthenticationEventSignOut) {
+        } else if (event is GoogleSignInAuthenticationEventSignOut) {
           _currentUser = null;
           timer.cancel();
           if (!completer.isCompleted) completer.complete(false);
@@ -140,8 +139,7 @@ class EmailService {
       final account = await _signIn.authenticate();
       _currentUser = account;
 
-      debugPrint(
-          'EmailService: authenticate() → ${account.email}');
+      debugPrint('EmailService: authenticate() → ${account.email}');
       return true;
     } catch (e) {
       debugPrint('EmailService: signIn error: $e');
@@ -170,8 +168,7 @@ class EmailService {
   ///      access token for specific API scopes
   Future<String?> _getAccessToken() async {
     if (_currentUser == null) {
-      debugPrint(
-          'EmailService: _getAccessToken — no current user');
+      debugPrint('EmailService: _getAccessToken — no current user');
       return null;
     }
 
@@ -185,8 +182,7 @@ class EmailService {
           .authorizeScopes([_gmailReadonlyScope]);
 
       if (auth?.accessToken == null) {
-        debugPrint(
-            'EmailService: authorizeScopes returned null token');
+        debugPrint('EmailService: authorizeScopes returned null token');
         return null;
       }
 
@@ -224,8 +220,7 @@ class EmailService {
   }) async {
     final api = await _getGmailApi();
     if (api == null) {
-      debugPrint(
-          'EmailService: fetchEmails — could not get Gmail API');
+      debugPrint('EmailService: fetchEmails — could not get Gmail API');
       return [];
     }
 
@@ -237,8 +232,7 @@ class EmailService {
       );
 
       final messages = listResponse.messages ?? [];
-      debugPrint(
-          'EmailService: got ${messages.length} message IDs');
+      debugPrint('EmailService: got ${messages.length} message IDs');
 
       final List<EmailModel> emails = [];
 
@@ -271,13 +265,11 @@ class EmailService {
 
           emails.add(EmailModel.fromGmailMessage(emailMap));
         } catch (e) {
-          debugPrint(
-              'EmailService: error fetching msg ${msg.id}: $e');
+          debugPrint('EmailService: error fetching msg ${msg.id}: $e');
         }
       }
 
-      debugPrint(
-          'EmailService: returning ${emails.length} emails');
+      debugPrint('EmailService: returning ${emails.length} emails');
       return emails;
     } catch (e) {
       debugPrint('EmailService: fetchEmails error: $e');
@@ -294,20 +286,16 @@ class EmailService {
       fetchEmails(query: 'is:unread newer_than:7d', maxResults: 10);
 
   Future<List<EmailModel>> fetchFromSender(String sender) async =>
-      fetchEmails(
-          query: 'from:$sender newer_than:30d', maxResults: 10);
+      fetchEmails(query: 'from:$sender newer_than:30d', maxResults: 10);
 
   Future<List<EmailModel>> fetchBySubject(String keyword) async =>
-      fetchEmails(
-          query: 'subject:$keyword newer_than:30d', maxResults: 10);
+      fetchEmails(query: 'subject:$keyword newer_than:30d', maxResults: 10);
 
   Future<List<EmailModel>> fetchImportantEmails() async =>
-      fetchEmails(
-          query: 'is:important newer_than:7d', maxResults: 10);
+      fetchEmails(query: 'is:important newer_than:7d', maxResults: 10);
 
   // ── Serialization ─────────────────────────────────────────────
 
-  List<Map<String, dynamic>> emailsToJson(
-          List<EmailModel> emails) =>
+  List<Map<String, dynamic>> emailsToJson(List<EmailModel> emails) =>
       emails.map((e) => e.toJson()).toList();
 }
