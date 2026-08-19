@@ -6,7 +6,9 @@ from app.routes import agent
 from app.routes import intelligence
 from app.routes import calendar as calendar_router
 from app.routes import email_route
+from app.routes import email_intelligence
 Base.metadata.create_all(bind=engine)
+
 
 app = FastAPI(
     title="UAILM API",
@@ -49,3 +51,9 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
+
+app.include_router(
+    email_intelligence.router,
+    prefix="/api/email-intelligence",
+    tags=["Email Intelligence"]
+)

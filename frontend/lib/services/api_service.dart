@@ -266,4 +266,43 @@ Future<Map<String, dynamic>> agentChatWithContext({
 
   return jsonDecode(response.body);
 }
+// ── Email Intelligence ────────────────────────────────────────────
+
+Future<Map<String, dynamic>> analyzeEmailsForTasks({
+  required int userId,
+  required List<Map<String, dynamic>> emails,
+}) async {
+  try {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/email-intelligence/analyze'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'user_id': userId,
+        'emails': emails,
+      }),
+    ).timeout(const Duration(seconds: 120)); // AI analysis takes time
+    return jsonDecode(response.body);
+  } catch (e) {
+    return {'candidates': [], 'error': e.toString()};
+  }
+}
+
+Future<Map<String, dynamic>> confirmEmailTask({
+  required int userId,
+  required Map<String, dynamic> candidate,
+}) async {
+  try {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/email-intelligence/confirm'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'user_id': userId,
+        'candidate': candidate,
+      }),
+    ).timeout(const Duration(seconds: 30));
+    return jsonDecode(response.body);
+  } catch (e) {
+    return {'status': 'error', 'error': e.toString()};
+  }
+}
 }

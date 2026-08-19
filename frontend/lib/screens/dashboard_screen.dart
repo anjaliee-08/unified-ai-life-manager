@@ -7,6 +7,7 @@ import '../services/notification_service.dart';
 import 'chat_screen.dart';
 import 'extract_screen.dart';
 import 'settings_screen.dart';
+import 'email_scan_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final int userId;
@@ -348,40 +349,7 @@ Widget _buildFocusCard() {
     );
   }
 
-  Widget _buildQuickActions() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-          AppSpacing.md, AppSpacing.md, AppSpacing.md, 0),
-      child: Row(
-        children: [
-          Expanded(
-            child: _QuickAction(
-              icon: Icons.auto_awesome_rounded,
-              label: 'Extract Tasks',
-              color: AppColors.primary,
-              onTap: () async {
-                await Navigator.push(
-                  context,
-                  _fadeRoute(
-                      ExtractScreen(userId: widget.userId)),
-                );
-                _loadData();
-              },
-            ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: _QuickAction(
-              icon: Icons.chat_bubble_rounded,
-              label: 'Ask UAILM',
-              color: AppColors.accent,
-              onTap: () => setState(() => _currentNavIndex = 1),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+
 
   Widget _buildTasksHeader() {
     return Padding(
@@ -393,7 +361,57 @@ Widget _buildFocusCard() {
       ),
     );
   }
-
+ Widget _buildQuickActions() {
+  return Padding(
+    padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md, AppSpacing.md, AppSpacing.md, 0),
+    child: Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _QuickAction(
+                icon: Icons.auto_awesome_rounded,
+                label: 'Extract Tasks',
+                color: AppColors.primary,
+                onTap: () async {
+                  await Navigator.push(
+                    context,
+                    _fadeRoute(ExtractScreen(userId: widget.userId)),
+                  );
+                  _loadData();
+                },
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: _QuickAction(
+                icon: Icons.chat_bubble_rounded,
+                label: 'Ask UAILM',
+                color: AppColors.accent,
+                onTap: () => setState(() => _currentNavIndex = 1),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        // Email scan — full width
+        _QuickAction(
+          icon: Icons.email_rounded,
+          label: 'Scan Emails for Tasks',
+          color: Colors.redAccent,
+          onTap: () async {
+            await Navigator.push(
+              context,
+              _fadeRoute(EmailScanScreen(userId: widget.userId)),
+            );
+            _loadData();
+          },
+        ),
+      ],
+    ),
+  );
+}
   Widget _buildSkeletonList() {
     return SliverList(
       delegate: SliverChildBuilderDelegate(

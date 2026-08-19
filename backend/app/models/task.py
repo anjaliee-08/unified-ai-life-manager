@@ -15,3 +15,4 @@ class Task(Base):
     confidence = Column(Float, default=1.0)      # AI confidence score
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime, nullable=True)
+    email_source_id = Column(String, nullable=True, index=True)
