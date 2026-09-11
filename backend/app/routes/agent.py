@@ -45,6 +45,17 @@ class EmailData(BaseModel):
     is_today: bool
     time_string: str
     labels: list = []
+class MessageData(BaseModel):
+    """SMS/device message sent from Flutter to agent — read-only"""
+    id: str = ""
+    sender: str
+    address: str = ""
+    snippet: str
+    timestamp: str
+    is_read: bool = True
+    is_incoming: bool = True
+    is_today: bool = False
+    time_string: str = ""
 class AgentRequest(BaseModel):
     user_id: int
     message: str
@@ -55,7 +66,7 @@ class AgentRequest(BaseModel):
     confirm_event_id: Optional[str] = None
     confirm_calendar_id: Optional[str] = None
     emails: Optional[List[EmailData]] = None
-
+    messages: Optional[List[MessageData]] = None
 class AgentResponse(BaseModel):
     response: str
     action_taken: Optional[str] = None
@@ -179,50 +190,66 @@ def format_task_list(tasks: list) -> str:
 
 # ─── Intent Detection ─────────────────────────────────────────────
 
-INTENT_SYSTEM_PROMPT = """You are an intent classifier for a task management AI assistant.
+INTENT_SYSTEM_PROMPT = """You are an intent classifier for a personal AI life manager.
 
-Classify the user's message into EXACTLY ONE of these intents:
+Classify the user's message into EXACTLY ONE intent from this list:
 
-QUERY_TODAY - asking about today's tasks AND/OR calendar
-QUERY_FOCUS - asking what to focus on or what's most important
-QUERY_HIGH_PRIORITY - asking about high priority tasks
-QUERY_OVERDUE - asking about overdue tasks
-QUERY_TOMORROW - asking about tomorrow's tasks AND/OR calendar
-QUERY_UPCOMING - asking about upcoming tasks/events this week
-QUERY_MEETINGS - asking about meetings or appointments
-QUERY_ALL - general question about all tasks
-QUERY_CALENDAR - asking specifically about calendar events
-QUERY_SCHEDULE_AT - asking about events at a specific time
+TASK INTENTS:
+QUERY_TODAY - tasks and/or schedule for today
+QUERY_FOCUS - what to focus on, most important tasks
+QUERY_HIGH_PRIORITY - high priority tasks
+QUERY_OVERDUE - overdue tasks
+QUERY_TOMORROW - tasks and/or schedule for tomorrow
+QUERY_UPCOMING - upcoming tasks/events this week
+QUERY_ALL - all pending tasks
 
-QUERY_EMAIL_ALL - asking about recent emails generally
-QUERY_EMAIL_TODAY - asking about today's emails
-QUERY_EMAIL_UNREAD - asking about unread emails
-QUERY_EMAIL_SENDER - asking about emails from a specific person
-QUERY_EMAIL_SUBJECT - asking about emails on a specific topic
-QUERY_EMAIL_IMPORTANT - asking about important emails
+CALENDAR INTENTS:
+QUERY_CALENDAR - calendar events generally
+QUERY_MEETINGS - meetings or appointments
+QUERY_SCHEDULE_AT - events at a specific time
 
-ACTION_COMPLETE - wants to mark a task as done/complete
-ACTION_DELETE - wants to delete a task
-ACTION_PRIORITY - wants to change task priority
-ACTION_CREATE - wants to create a new task
-ACTION_CREATE_EVENT - wants to create a calendar event
-ACTION_DELETE_EVENT - wants to delete a calendar event
+EMAIL INTENTS:
+QUERY_EMAIL_ALL - recent emails generally
+QUERY_EMAIL_TODAY - today's emails
+QUERY_EMAIL_UNREAD - unread emails
+QUERY_EMAIL_SENDER - emails from a specific person
+QUERY_EMAIL_SUBJECT - emails about a specific topic
+QUERY_EMAIL_IMPORTANT - important emails
 
-GENERAL - general conversation not related to tasks
+MESSAGE INTENTS — use these when the user asks about SMS or text messages:
+QUERY_MESSAGE_ALL - recent messages generally ("show my messages", "what messages did I get")
+QUERY_MESSAGE_TODAY - messages received today ("messages today", "texts today")
+QUERY_MESSAGE_UNREAD - unread messages ("unread messages", "new texts")
+QUERY_MESSAGE_SENDER - messages from a specific person ("did Aditya message me", "texts from Rahul", "did Priya send a message")
+QUERY_MESSAGE_KEYWORD - messages about a specific topic ("messages about assignment", "texts about meeting")
 
-Reply with ONLY a JSON object. No explanation. No markdown.
+TASK ACTION INTENTS:
+ACTION_COMPLETE - mark a task complete
+ACTION_DELETE - delete a task
+ACTION_PRIORITY - change task priority
+ACTION_CREATE - create a new task
+ACTION_CREATE_EVENT - create a calendar event
+ACTION_DELETE_EVENT - delete a calendar event
 
-Format:
+GENERAL - anything else not covered above
+
+Reply ONLY with valid JSON. No explanation. No markdown. No code blocks.
+
 {
   "intent": "INTENT_NAME",
-  "task_reference": "the task they mentioned or null",
-  "event_reference": "the calendar event they mentioned or null",
-  "email_sender_reference": "sender name/email they mentioned or null",
-  "email_subject_reference": "subject keyword they mentioned or null",
-  "new_priority": "high/medium/low or null",
+  "task_reference": "task name mentioned or null",
+  "event_reference": "calendar event mentioned or null",
+  "email_sender_reference": "email sender name or null",
+  "email_subject_reference": "email subject keyword or null",
+  "message_sender_reference": "person name from message query or null",
+  "message_keyword_reference": "topic from message query or null",
+  "new_priority": "high or medium or low or null",
   "time_reference": "specific time mentioned or null",
   "confidence": 0.9
-}"""
+}
+
+IMPORTANT: For queries like "did Aditya message me?" or "has Rahul texted?" —
+always use QUERY_MESSAGE_SENDER and set message_sender_reference to the person's name."""
 async def detect_intent(message: str) -> dict:
     """Use Qwen to classify intent from user message."""
     try:
@@ -358,6 +385,14 @@ async def agent_chat(
     task_ref = intent_data.get("task_reference")
     new_priority = intent_data.get("new_priority")
 
+    # Debug — visible in uvicorn logs
+    import logging
+    logging.getLogger("uvicorn").info(
+        f"Agent intent: {intent} | "
+        f"message_sender_ref: {intent_data.get('message_sender_reference')} | "
+        f"messages_count: {len(req.messages or [])}"
+    )
+
     real_data = ""
     action_result = None
     requires_confirmation = False
@@ -371,7 +406,6 @@ async def agent_chat(
         tasks = tool_get_today_tasks(req.user_id, db)
         workload = analyze_workload(req.user_id, db, now)
         cal_events = [e.dict() for e in (req.calendar_events or [])]
-        
         real_data = (
             f"Today is {today_str}.\n\n"
             f"Today's tasks:\n{format_task_list(tasks)}\n\n"
@@ -510,6 +544,98 @@ async def agent_chat(
         real_data = format_emails(
             matched,
             f"about '{subject_ref}'" if subject_ref else "all"
+        )
+    elif intent == "QUERY_MESSAGE_ALL":
+        msgs = [m.dict() for m in (req.messages or [])]
+        if not msgs:
+            real_data = (
+                "No messages provided. "
+                "Message permission may not be granted."
+            )
+        else:
+            real_data = format_messages(msgs, "recent")
+
+    elif intent == "QUERY_MESSAGE_TODAY":
+        msgs = [m.dict() for m in (req.messages or [])]
+        today_msgs = [m for m in msgs if m.get('is_today')]
+        real_data = format_messages(
+            today_msgs if today_msgs else msgs,
+            "today" if today_msgs
+            else "recent — no messages today"
+        )
+
+    elif intent == "QUERY_MESSAGE_UNREAD":
+        msgs = [m.dict() for m in (req.messages or [])]
+        unread = [m for m in msgs if not m.get('is_read')]
+        real_data = format_messages(unread, "unread")
+
+    elif intent == "QUERY_MESSAGE_SENDER":
+        sender_ref = intent_data.get(
+            "message_sender_reference", "") or ""
+        msgs = [m.dict() for m in (req.messages or [])]
+        print("========== MESSAGE DEBUG ==========")
+        print("Sender requested:", sender_ref)
+        print("Total messages:", len(msgs))
+
+        for i, m in enumerate(msgs):
+            print(
+                f"{i}: sender={m.get('sender')} | "
+                f"address={m.get('address')} | "
+                f"time={m.get('time_string')} | "
+                f"snippet={m.get('snippet')}"
+            )
+
+        print("===================================")
+
+        if not msgs:
+            real_data = (
+                "No messages were provided. "
+                "Message permission may not be granted on the device."
+            )
+        elif sender_ref:
+            ref_lower = sender_ref.lower().strip()
+            # Search sender name AND address AND snippet
+            # This handles cases where contact name resolution
+            # gave us a phone number instead of a name
+            matched = [
+                m for m in msgs
+                if ref_lower in m.get('sender', '').lower()
+                or ref_lower in m.get('address', '').lower()
+                or ref_lower in m.get('snippet', '').lower()
+            ]
+            if matched:
+                real_data = format_messages(
+                    matched,
+                    f"from '{sender_ref}'"
+                )
+            else:
+                # No match — show all messages so AI can search
+                # and explain that no match was found
+                real_data = (
+                    f"No messages found specifically from "
+                    f"'{sender_ref}'. "
+                    f"All available messages:\n"
+                    f"{format_messages(msgs, 'recent')}"
+                )
+        else:
+            real_data = format_messages(msgs, "recent")
+
+    elif intent == "QUERY_MESSAGE_KEYWORD":
+        keyword_ref = intent_data.get(
+            "message_keyword_reference", "")
+        msgs = [m.dict() for m in (req.messages or [])]
+        if keyword_ref:
+            kw = keyword_ref.lower()
+            matched = [
+                m for m in msgs
+                if kw in m.get('snippet', '').lower()
+                or kw in m.get('sender', '').lower()
+            ]
+        else:
+            matched = msgs
+        real_data = format_messages(
+            matched,
+            f"about '{keyword_ref}'" if keyword_ref else "all"
         )
     elif intent == "QUERY_SCHEDULE_AT":
         intent_data_full = await detect_intent(req.message)
@@ -783,6 +909,30 @@ def format_emails(emails: list, filter_desc: str = "") -> str:
             f"- {unread}{important}From: {sender} | "
             f"Subject: {subject} | {time_str}\n"
             f"  Preview: {snippet}"
+        )
+
+    return "\n".join(lines)
+def format_messages(messages: list, filter_desc: str = "") -> str:
+    """Format device messages for AI context."""
+    if not messages:
+        return "none"
+
+    desc = f" ({filter_desc})" if filter_desc else ""
+    lines = [f"Messages{desc}:"]
+
+    for m in messages:
+        unread = "UNREAD " if not m.get('is_read') else ""
+        sender = m.get('sender', 'Unknown')
+        snippet = m.get('snippet', '')
+        time_str = m.get('time_string', '')
+
+        # Truncate snippet for AI context
+        if len(snippet) > 100:
+            snippet = snippet[:100] + '...'
+
+        lines.append(
+            f"- {unread}From: {sender} | {time_str}\n"
+            f"  Message: {snippet}"
         )
 
     return "\n".join(lines)

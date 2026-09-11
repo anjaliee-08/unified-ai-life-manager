@@ -236,6 +236,7 @@ Future<Map<String, dynamic>> agentChatWithContext({
   required String message,
   List<Map<String, dynamic>> calendarEvents = const [],
   List<Map<String, dynamic>> emails = const [],
+  List<Map<String, dynamic>>? messages,
   String? confirmAction,
   int? confirmTaskId,
   String? confirmCalendarAction,
@@ -247,6 +248,7 @@ Future<Map<String, dynamic>> agentChatWithContext({
     'message': message,
     'calendar_events': calendarEvents,
     'emails': emails,
+    'messages': messages,
   };
   if (confirmAction != null) body['confirm_action'] = confirmAction;
   if (confirmTaskId != null) body['confirm_task_id'] = confirmTaskId;

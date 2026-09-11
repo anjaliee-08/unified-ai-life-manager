@@ -26,6 +26,9 @@ dependencies:
   device_calendar: ^4.3.2
   google_sign_in: ^7.2.0
   googleapis: ^16.0.0
+  flutter_sms_inbox: ^1.0.2
+  permission_handler: ^11.3.1
+  flutter_contacts: ^2.5.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -37,3 +40,5 @@ flutter:
 google_sign_in: ^6.2.1
 googleapis: ^13.2.0
 flutter_secure_storage: ^9.0.0
+
+flutter_contacts: ^1.1.9

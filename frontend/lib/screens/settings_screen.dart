@@ -1,3 +1,4 @@
+import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
@@ -5,6 +6,7 @@ import '../services/calendar_service.dart';
 import '../utils/app_theme.dart';
 import 'login_screen.dart';
 import '../services/email_service.dart';
+import '../services/message_service.dart';
 class SettingsScreen extends StatefulWidget {
   final int userId;
   final String userName;
@@ -26,6 +28,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _loading = true;
   bool _calendarEnabled = false;
   bool _emailConnected = false;
+  bool _messagesEnabled = false;
   String _connectedEmail = '';
   @override
   void initState() {
@@ -33,6 +36,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadStatus();
     _checkCalendarPermission();
     _checkEmailStatus();
+    _checkMessagePermission();
   }
 
   Future<void> _loadStatus() async {
@@ -60,6 +64,51 @@ Future<void> _checkEmailStatus() async {
       _emailConnected = ok;
       _connectedEmail = EmailService().connectedEmail ?? '';
     });
+  }
+}
+Future<void> _checkMessagePermission() async {
+  // Re-check every time settings screen loads
+  // in case user granted permission from Android Settings
+  final ok = await MessageService().checkPermission();
+  if (mounted) setState(() => _messagesEnabled = ok);
+}
+
+Future<void> _requestMessagePermission() async {
+  final status = await Permission.sms.status;
+
+  if (status.isPermanentlyDenied) {
+    // User previously denied permanently — open Android Settings
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text(
+            'Enable SMS permission in Android Settings → Apps → UAILM → Permissions'),
+        backgroundColor: AppColors.warning,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 4),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadius.md)),
+        margin: const EdgeInsets.all(AppSpacing.md),
+      ));
+      await openAppSettings();
+    }
+    return;
+  }
+
+  final ok = await MessageService().requestPermission();
+  if (mounted) {
+    setState(() => _messagesEnabled = ok);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(ok
+          ? 'Message access enabled ✓'
+          : 'Permission denied — tap again to open Settings'),
+      backgroundColor:
+          ok ? AppColors.success : AppColors.error,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.md)),
+      margin: const EdgeInsets.all(AppSpacing.md),
+      duration: const Duration(seconds: 2),
+    ));
   }
 }
 
@@ -323,6 +372,63 @@ GestureDetector(
               ? Icons.check_circle_rounded
               : Icons.arrow_forward_ios_rounded,
           color: _emailConnected
+              ? AppColors.success
+              : AppColors.textMuted,
+          size: 16,
+        ),
+      ],
+    ),
+  ),
+),
+const SizedBox(height: AppSpacing.sm),
+GestureDetector(
+  onTap: _messagesEnabled
+      ? null
+      : _requestMessagePermission,
+  child: AppCard(
+    child: Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.green
+                .withValues(alpha: 0.1),
+            borderRadius:
+                BorderRadius.circular(AppRadius.sm),
+          ),
+          child: const Icon(
+            Icons.message_rounded,
+            color: Colors.green,
+            size: 16,
+          ),
+        ),
+        const SizedBox(width: AppSpacing.md),
+        Expanded(
+          child: Column(
+            crossAxisAlignment:
+                CrossAxisAlignment.start,
+            children: [
+              Text('Messages',
+                  style: AppTextStyles.bodyLarge),
+              Text(
+                _messagesEnabled
+                    ? 'Connected · UAILM can read your messages'
+                    : 'Tap to enable message access',
+                style: AppTextStyles.bodySmall
+                    .copyWith(
+                  color: _messagesEnabled
+                      ? AppColors.success
+                      : AppColors.textMuted,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Icon(
+          _messagesEnabled
+              ? Icons.check_circle_rounded
+              : Icons.arrow_forward_ios_rounded,
+          color: _messagesEnabled
               ? AppColors.success
               : AppColors.textMuted,
           size: 16,

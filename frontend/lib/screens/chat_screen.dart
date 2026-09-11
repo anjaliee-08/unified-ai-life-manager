@@ -5,7 +5,8 @@ import '../services/calendar_service.dart';
 import '../models/calendar_event_model.dart';
 import '../services/email_service.dart';
 import '../models/email_model.dart';
-
+import '../services/message_service.dart';
+import '../models/message_model.dart';
 class ChatMessage {
   final String text;
   final bool isUser;
@@ -46,6 +47,8 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _calendarEnabled = false;
   final EmailService _email = EmailService();
   bool _emailConnected = false;
+  final MessageService _sms = MessageService();
+  bool _messagesEnabled = false;
   // Pending destructive action waiting for confirmation
   Map<String, dynamic>? _pendingAction;
 
@@ -56,6 +59,7 @@ void initState() {
   _addWelcome();
   _initCalendar();
   _initEmail();
+  _initMessages();
 }
 
 Future<void> _initCalendar() async {
@@ -66,6 +70,104 @@ Future<void> _initEmail() async {
   final ok = await _email.checkSignedIn();
   if (mounted) setState(() => _emailConnected = ok);
 }
+Future<void> _initMessages() async {
+  // Re-check permission each time screen initializes
+  // to catch cases where user granted it in Settings
+  final ok = await _sms.checkPermission();
+  if (mounted) {
+    setState(() => _messagesEnabled = ok);
+    debugPrint('ChatScreen: _messagesEnabled = $ok');
+  }
+}
+  /// Extract a person's name from a message-related query.
+  ///
+  /// Handles:
+  ///   "did Aditya message me?" → "Aditya"
+  ///   "any messages from Rahul?" → "Rahul"
+  ///   "has Priya texted me?" → "Priya"
+  ///   "did I get a message from Aditya Yadav?" → "Aditya Yadav"
+  ///   "show me Aditya's messages" → "Aditya"
+  String? _extractSenderFromQuery(String query) {
+    final q = query.trim();
+
+    // Pattern 1: "from <Name>" — most explicit
+    final fromPattern = RegExp(
+      r'\bfrom\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)',
+      caseSensitive: true,
+    );
+    final fromMatch = fromPattern.firstMatch(q);
+    if (fromMatch != null) {
+      return fromMatch.group(1)?.trim();
+    }
+
+    // Pattern 2: "<Name> message/text/sms"
+    // "Aditya message me" / "Aditya texted"
+    final nameBeforeVerbPattern = RegExp(
+      r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+'
+      r'(?:message|text|sms|messaged|texted|send|sent)',
+      caseSensitive: true,
+    );
+    final nameBeforeMatch =
+        nameBeforeVerbPattern.firstMatch(q);
+    if (nameBeforeMatch != null) {
+      final candidate = nameBeforeMatch.group(1)?.trim();
+      // Exclude common non-name words
+      if (candidate != null && !_isStopWord(candidate)) {
+        return candidate;
+      }
+    }
+
+    // Pattern 3: "did <Name> message/text"
+    // "did Aditya message me?"
+    final didPattern = RegExp(
+      r'\bdid\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+'
+      r'(?:message|text|sms|send|messaged|texted)',
+      caseSensitive: true,
+    );
+    final didMatch = didPattern.firstMatch(q);
+    if (didMatch != null) {
+      final candidate = didMatch.group(1)?.trim();
+      if (candidate != null && !_isStopWord(candidate)) {
+        return candidate;
+      }
+    }
+
+    // Pattern 4: "has <Name> texted/messaged"
+    final hasPattern = RegExp(
+      r'\bhas\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+'
+      r'(?:texted|messaged|sent)',
+      caseSensitive: true,
+    );
+    final hasMatch = hasPattern.firstMatch(q);
+    if (hasMatch != null) {
+      final candidate = hasMatch.group(1)?.trim();
+      if (candidate != null && !_isStopWord(candidate)) {
+        return candidate;
+      }
+    }
+
+    // Pattern 5: "<Name>'s messages"
+    // "show me Aditya's messages"
+    final possessivePattern = RegExp(
+      r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)'s\s+message",
+      caseSensitive: true,
+    );
+    final possessiveMatch = possessivePattern.firstMatch(q);
+    if (possessiveMatch != null) {
+      return possessiveMatch.group(1)?.trim();
+    }
+
+    return null; // No sender name found
+  }
+
+  bool _isStopWord(String word) {
+    const stopWords = {
+      'I', 'Me', 'My', 'We', 'You', 'He', 'She', 'It',
+      'They', 'Any', 'The', 'A', 'An', 'Did', 'Has',
+      'Have', 'Do', 'Does', 'Get', 'Got', 'Show',
+    };
+    return stopWords.contains(word);
+  }
 /// Extract explicit date from message like "August 14", "Aug 17", "17th"
   DateTime? _parseDateFromMessage(String message) {
     final lower = message.toLowerCase();
@@ -236,6 +338,84 @@ Future<void> _initEmail() async {
         debugPrint('Email fetch error: $e');
       }
     }
+        // ── Fetch device messages ──────────────────────────────────
+        // ── Fetch device messages ──────────────────────────────────
+    List<Map<String, dynamic>> messagePayload = [];
+    if (_messagesEnabled) {
+      try {
+        final msgLower = text.toLowerCase();
+
+        // Detect if this query is about messages/SMS
+        final isMessageQuery =
+            msgLower.contains('message') ||
+            msgLower.contains('sms') ||
+            msgLower.contains('text me') ||
+            msgLower.contains('texted') ||
+            msgLower.contains('messaged') ||
+            msgLower.contains('inbox') ||
+            msgLower.contains('unread') ||
+            msgLower.contains('did') && msgLower.contains('send') ||
+            msgLower.contains('latest message') ||
+            msgLower.contains('recent message') ||
+            msgLower.contains('new message');
+
+        if (isMessageQuery) {
+          List<MessageModel> fetchedMessages = [];
+
+          if (msgLower.contains('unread')) {
+            fetchedMessages = await _sms.fetchUnread();
+          } else if (msgLower.contains('today')) {
+            fetchedMessages = await _sms.fetchToday();
+          } else {
+            // BUG FIX: Extract sender name from ANYWHERE in query,
+            // not just after "from".
+            //
+            // Handles patterns like:
+            //   "did Aditya message me?"
+            //   "has Rahul texted?"
+            //   "any messages from Priya?"
+            //   "did I get a message from Aditya?"
+            //   "Aditya message"
+            final String? senderName =
+                _extractSenderFromQuery(text);
+
+            if (senderName != null) {
+              // Fetch all and filter by resolved contact name
+              fetchedMessages =
+                  await _sms.fetchFromSender(senderName);
+
+              // If no match found by name, fall back to recent
+              // so the agent can at least see context
+              if (fetchedMessages.isEmpty) {
+                debugPrint(
+                  'ChatScreen: no messages from "$senderName", '
+                  'falling back to recent',
+                );
+                fetchedMessages =
+                    await _sms.fetchRecent(count: 15);
+              }
+            } else {
+              fetchedMessages =
+                  await _sms.fetchRecent(count: 15);
+            }
+          }
+
+          messagePayload =
+              _sms.messagesToJson(fetchedMessages);
+          debugPrint(
+            'ChatScreen: sending ${messagePayload.length} '
+            'messages to agent',
+          );
+        }
+        // Non-message queries: skip SMS fetch entirely
+      } catch (e) {
+        debugPrint('MessageService fetch error: $e');
+        messagePayload = [];
+      }
+    } else {
+      debugPrint(
+          'ChatScreen: _messagesEnabled=false, skipping SMS fetch');
+    }
 
     // ── Send to agent ──────────────────────────────────────────
     final result = await _api.agentChatWithContext(
@@ -243,6 +423,7 @@ Future<void> _initEmail() async {
       message: text,
       calendarEvents: calendarEvents,
       emails: emailPayload,
+      messages: messagePayload,
     );
 
     if (!mounted) return;
