@@ -8,6 +8,7 @@ import 'chat_screen.dart';
 import 'extract_screen.dart';
 import 'settings_screen.dart';
 import 'email_scan_screen.dart';
+import 'sms_scan_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final int userId;
@@ -406,6 +407,18 @@ Widget _buildFocusCard() {
               _fadeRoute(EmailScanScreen(userId: widget.userId)),
             );
             _loadData();
+          },
+        ),
+                const SizedBox(height: AppSpacing.sm),
+        _QuickAction(
+          icon: Icons.psychology_rounded,
+          label: 'Scan Message Intelligence',
+          color: Colors.green,
+          onTap: () async {
+            await Navigator.push(
+              context,
+              _fadeRoute(SmsScanScreen(userId: widget.userId)),
+            );
           },
         ),
       ],

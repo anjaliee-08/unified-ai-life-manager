@@ -7,6 +7,7 @@ from app.routes import intelligence
 from app.routes import calendar as calendar_router
 from app.routes import email_route
 from app.routes import email_intelligence
+from app.routes import sms_intelligence
 Base.metadata.create_all(bind=engine)
 
 
@@ -42,6 +43,11 @@ app.include_router(
     email_route.router,
     prefix="/api/email",
     tags=["Email"]
+)
+app.include_router(
+    sms_intelligence.router,
+    prefix="/api/sms-intelligence",
+    tags=["SMS Intelligence"]
 )
 
 @app.get("/")
