@@ -256,3 +256,89 @@ def _error_result(
         "original_snippet": "",
         "error": error,
     }
+# ── Duplicate detection ────────────────────────────────────────────
+
+def is_sms_duplicate(
+    user_id: int,
+    message_id: str,
+    db,
+) -> bool:
+    """
+    Check if a task already exists for this SMS message ID
+    and this user. Uses sms_source_id field.
+    User isolation enforced — checks user_id too.
+    """
+    if not message_id:
+        return False
+    from app.models.task import Task
+    existing = db.query(Task).filter(
+        Task.user_id == user_id,
+        Task.sms_source_id == message_id,
+    ).first()
+    return existing is not None
+
+
+# ── Task creation from confirmed SMS extraction ────────────────────
+
+def create_task_from_sms(
+    user_id: int,
+    extraction: dict,
+    db,
+) -> object:
+    """
+    Create a Task from a confirmed SMS extraction.
+
+    Reuses the existing Task model — same fields as email tasks,
+    source="sms", sms_source_id=message_id for duplicate prevention.
+
+    Called ONLY after explicit user confirmation from Flutter.
+    Never called automatically.
+    Phase 5C (calendar events) is NOT implemented here.
+    """
+    from app.models.task import Task
+
+    # Build description from available fields
+    description = (
+        extraction.get('title')
+        or extraction.get('description')
+        or 'Task from SMS'
+    ).strip()
+
+    # Resolve deadline — prefer explicit deadline/due_date fields,
+    # fall back to date+time combination
+    deadline = None
+    deadline_str = (
+        extraction.get('deadline')
+        or extraction.get('due_date')
+        or extraction.get('date')
+    )
+    if deadline_str:
+        from app.services.email_intelligence_service import resolve_deadline
+        deadline = resolve_deadline(deadline_str, datetime.now())
+
+    # Determine priority
+    priority = extraction.get('priority', 'medium')
+    if priority not in ('high', 'medium', 'low'):
+        # Infer from SMS type if priority not set
+        sms_type = extraction.get('type', 'OTHER')
+        if sms_type in ('BILL', 'PAYMENT', 'DEADLINE'):
+            priority = 'high'
+        elif sms_type in ('TASK', 'APPOINTMENT', 'MEETING'):
+            priority = 'medium'
+        else:
+            priority = 'medium'
+
+    task = Task(
+        user_id=user_id,
+        description=description,
+        deadline=deadline,
+        priority=priority,
+        status='pending',
+        source='sms',
+        confidence=extraction.get('confidence', 0.8),
+        sms_source_id=extraction.get('message_id'),
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task

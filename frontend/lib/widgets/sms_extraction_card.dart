@@ -5,11 +5,18 @@ import '../utils/app_theme.dart';
 class SmsExtractionCard extends StatelessWidget {
   final SmsExtractionModel extraction;
   final VoidCallback onDismiss;
+  // Phase 5B additions — null means no task button shown
+  final VoidCallback? onCreateTask;
+  final bool taskLoading;
+  final bool taskCreated;
 
   const SmsExtractionCard({
     super.key,
     required this.extraction,
     required this.onDismiss,
+    this.onCreateTask,
+    this.taskLoading = false,
+    this.taskCreated = false,
   });
 
   Color get _typeColor {
@@ -52,7 +59,7 @@ class SmsExtractionCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header row
+          // ── Header row ────────────────────────────────────────
           Row(
             children: [
               Container(
@@ -83,20 +90,22 @@ class SmsExtractionCard extends StatelessWidget {
                 color: _confidenceColor,
               ),
               const SizedBox(width: AppSpacing.sm),
-              GestureDetector(
-                onTap: onDismiss,
-                child: const Icon(
-                  Icons.close_rounded,
-                  color: AppColors.textMuted,
-                  size: 16,
+              // Hide dismiss when task already created
+              if (!taskCreated)
+                GestureDetector(
+                  onTap: onDismiss,
+                  child: const Icon(
+                    Icons.close_rounded,
+                    color: AppColors.textMuted,
+                    size: 16,
+                  ),
                 ),
-              ),
             ],
           ),
 
           const SizedBox(height: AppSpacing.sm),
 
-          // Sender
+          // ── Sender ────────────────────────────────────────────
           Row(
             children: [
               const Icon(Icons.message_rounded,
@@ -116,7 +125,7 @@ class SmsExtractionCard extends StatelessWidget {
           const Divider(color: AppColors.divider, height: 1),
           const SizedBox(height: AppSpacing.sm),
 
-          // OTP: show type only, never the code
+          // ── Content ───────────────────────────────────────────
           if (extraction.isOtp) ...[
             Text(
               'One-time password detected',
@@ -128,14 +137,11 @@ class SmsExtractionCard extends StatelessWidget {
               style: AppTextStyles.bodySmall,
             ),
           ] else ...[
-            // Title
             if (extraction.title != null)
               Text(
                 extraction.title!,
                 style: AppTextStyles.titleMedium,
               ),
-
-            // Description
             if (extraction.description != null) ...[
               const SizedBox(height: 4),
               Text(
@@ -143,8 +149,6 @@ class SmsExtractionCard extends StatelessWidget {
                 style: AppTextStyles.bodyMedium,
               ),
             ],
-
-            // Date/time
             if (extraction.dateTimeDisplay != null) ...[
               const SizedBox(height: AppSpacing.sm),
               Row(
@@ -154,14 +158,12 @@ class SmsExtractionCard extends StatelessWidget {
                   const SizedBox(width: 4),
                   Text(
                     extraction.dateTimeDisplay!,
-                    style: AppTextStyles.bodySmall.copyWith(
-                        color: AppColors.primary),
+                    style: AppTextStyles.bodySmall
+                        .copyWith(color: AppColors.primary),
                   ),
                 ],
               ),
             ],
-
-            // Amount
             if (extraction.amountDisplay != null) ...[
               const SizedBox(height: 4),
               Row(
@@ -179,18 +181,15 @@ class SmsExtractionCard extends StatelessWidget {
                   Text(
                     extraction.amountDisplay!,
                     style: AppTextStyles.bodySmall.copyWith(
-                      color:
-                          extraction.transactionType == 'credit'
-                              ? AppColors.success
-                              : AppColors.error,
+                      color: extraction.transactionType == 'credit'
+                          ? AppColors.success
+                          : AppColors.error,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                 ],
               ),
             ],
-
-            // Original snippet (not for OTP)
             if (extraction.originalSnippet.isNotEmpty) ...[
               const SizedBox(height: AppSpacing.sm),
               Container(
@@ -210,13 +209,61 @@ class SmsExtractionCard extends StatelessWidget {
             ],
           ],
 
-          // Phase 5A info footer
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            'ℹ️ Informational — no action taken',
-            style: AppTextStyles.caption
-                .copyWith(color: AppColors.textMuted),
-          ),
+          // ── Phase 5B: Create Task button ──────────────────────
+          // Only shown for actionable types.
+          // OTP, INFORMATION, OTHER: no button.
+          if (extraction.isActionable && !extraction.isOtp) ...[
+            const SizedBox(height: AppSpacing.md),
+            if (taskCreated)
+              // Success state — disable button, show confirmation
+              Row(
+                children: [
+                  const Icon(Icons.check_circle_rounded,
+                      color: AppColors.success, size: 16),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Task created ✓',
+                    style: AppTextStyles.labelLarge
+                        .copyWith(color: AppColors.success),
+                  ),
+                ],
+              )
+            else
+              Row(
+                children: [
+                  Expanded(
+                    child: AppButton(
+                      label: taskLoading
+                          ? 'Creating...'
+                          : 'Create Task',
+                      icon: taskLoading
+                          ? null
+                          : Icons.add_task_rounded,
+                      loading: taskLoading,
+                      // Disabled while loading to prevent duplicate taps
+                      onTap: taskLoading ? null : onCreateTask,
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: AppButton(
+                      label: 'Dismiss',
+                      outlined: true,
+                      color: AppColors.textSecondary,
+                      onTap: onDismiss,
+                    ),
+                  ),
+                ],
+              ),
+          ] else ...[
+            // Non-actionable types — dismiss only
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'ℹ️ Informational — no action taken',
+              style: AppTextStyles.caption
+                  .copyWith(color: AppColors.textMuted),
+            ),
+          ],
         ],
       ),
     );

@@ -50,6 +50,22 @@ class SmsExtractionModel {
       originalSnippet: json['original_snippet'] ?? '',
     );
   }
+  Map<String, dynamic> toJson() => {
+      'message_id': messageId,
+      'sender': sender,
+      'type': type,
+      'title': title,
+      'description': description,
+      'date': date,
+      'time': time,
+      'deadline': deadline,
+      'due_date': dueDate,
+      'amount': amount,
+      'transaction_type': transactionType,
+      'confidence': confidence,
+      'confidence_label': confidenceLabel,
+      'original_snippet': originalSnippet,
+    };
 
   // ── Display helpers ──────────────────────────────────────────
 
