@@ -327,4 +327,28 @@ Future<Map<String, dynamic>> analyzeSmsMessages({
     return {'extractions': [], 'error': e.toString()};
   }
 }
+// ── SMS Intelligence Confirmation ────────────────────────────────
+
+Future<Map<String, dynamic>> confirmSmsTask({
+  required int userId,
+  required Map<String, dynamic> extraction,
+}) async {
+  try {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/sms-intelligence/confirm'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'user_id': userId,
+        'extraction': extraction,
+      }),
+    ).timeout(const Duration(seconds: 30));
+
+    return jsonDecode(response.body);
+  } catch (e) {
+    return {
+      'status': 'error',
+      'error': e.toString(),
+    };
+  }
+}
 }

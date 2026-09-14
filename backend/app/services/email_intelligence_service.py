@@ -104,8 +104,8 @@ def resolve_deadline(deadline_text: Optional[str], now: datetime) -> Optional[da
     text = deadline_text.lower().strip()
 
     # Extract time component if present
-    time_hour = 23
-    time_minute = 59
+    time_hour = None
+    time_minute = None
 
     time_match = re.search(
         r'(\d{1,2})(?::(\d{2}))?\s*(am|pm)', text
@@ -157,12 +157,19 @@ def resolve_deadline(deadline_text: Optional[str], now: datetime) -> Optional[da
         # Could not resolve — return None, not a fake date
         return None
 
+        # If no explicit time was found, do NOT invent one.
+    # Use end-of-day only when deadline semantics require it
+    # (e.g. "due Friday" means by the end of Friday).
+    # The AI is instructed not to report 23:59 as a real time.
+    resolved_hour = time_hour if time_hour is not None else 23
+    resolved_minute = time_minute if time_minute is not None else 59
+
     return datetime(
         target_date.year,
         target_date.month,
         target_date.day,
-        time_hour,
-        time_minute,
+        resolved_hour,
+        resolved_minute,
         0,
     )
 

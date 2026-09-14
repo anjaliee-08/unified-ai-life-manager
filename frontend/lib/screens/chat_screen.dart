@@ -278,9 +278,15 @@ Future<void> _initMessages() async {
             msgLower.contains('calendar') ||
             msgLower.contains('schedule') ||
             msgLower.contains('what do i have') ||
-            msgLower.contains('what time')) {
-          events = await _calendar.getTodayEvents();
-        } else {
+            msgLower.contains('what time') ||
+            msgLower.contains('add to calendar') ||
+            msgLower.contains('add my meeting') ||
+            msgLower.contains('add meeting') ||
+            msgLower.contains('create event') ||
+            msgLower.contains('put it on') ||
+            msgLower.contains('book') ||
+            msgLower.contains('slot')) {
+          // Fetch upcoming events for conflict detection
           final today = await _calendar.getTodayEvents();
           final tomorrow = await _calendar.getTomorrowEvents();
           events = [...today, ...tomorrow];
@@ -484,9 +490,60 @@ Future<void> _initMessages() async {
     String responseText = '';
     final actionType = lastPending['type'] ?? '';
 
-    if (action == 'no') {
+   if (action == 'no') {
       responseText = 'No problem! Action cancelled.';
+
+    } else if (actionType == 'create_calendar_event') {
+      // Flutter executes calendar creation directly.
+      // NEVER trust the AI to claim success — we verify here.
+      final title = lastPending['title'] as String? ?? 'Event';
+      final dateStr = lastPending['date'] as String?;
+      final timeStr = lastPending['time'] as String?;
+      final durationHours =
+          (lastPending['duration_hours'] as num?)?.toInt() ?? 1;
+
+      // Resolve date+time to actual DateTime
+      DateTime? start;
+      DateTime? end;
+
+      if (dateStr != null || timeStr != null) {
+        start = _resolveEventDateTime(dateStr, timeStr);
+        if (start != null) {
+          end = start.add(Duration(hours: durationHours));
+        }
+      }
+
+      if (start == null || end == null) {
+        responseText =
+            "I couldn't determine the exact date and time. "
+            "Please specify the date and time more clearly, "
+            "for example: 'Add meeting tomorrow at 5 PM'.";
+      } else {
+        // Actually call CalendarService — this is the ONLY place
+        // where calendar creation is executed from chat
+        final calResult = await _calendar.createEvent(
+          title: title,
+          start: start,
+          end: end,
+          description: 'Added via UAILM chat',
+        );
+
+        if (calResult.success) {
+          responseText =
+              "✅ Done! **$title** has been added to your "
+              "calendar.\n\n"
+              "📅 ${_formatDateTime(start)} – "
+              "${_formatTime(end)}";
+        } else {
+          responseText =
+              "⚠️ Could not add to calendar: "
+              "${calResult.error ?? 'Unknown error'}. "
+              "Please try again or add it manually.";
+        }
+      }
+
     } else if (actionType == 'delete_calendar_event') {
+      // existing delete logic unchanged
       // Flutter executes calendar delete directly
       final eventId = lastPending['event_id'] ?? '';
       final calendarId = lastPending['calendar_id'] ?? '';
@@ -862,6 +919,113 @@ Future<void> _initMessages() async {
         ],
       ),
     );
+  }
+    /// Resolve a date string + time string into a local DateTime.
+  /// Returns null if date cannot be reliably determined.
+  /// Never invents a date.
+  DateTime? _resolveEventDateTime(
+      String? dateStr, String? timeStr) {
+    final now = DateTime.now();
+    DateTime? resolvedDate;
+
+    if (dateStr != null) {
+      final lower = dateStr.toLowerCase();
+      if (lower.contains('today')) {
+        resolvedDate = DateTime(now.year, now.month, now.day);
+      } else if (lower.contains('tomorrow')) {
+        final t = now.add(const Duration(days: 1));
+        resolvedDate = DateTime(t.year, t.month, t.day);
+      } else {
+        // Try weekday
+        const weekdays = {
+          'monday': 1, 'tuesday': 2, 'wednesday': 3,
+          'thursday': 4, 'friday': 5, 'saturday': 6, 'sunday': 7,
+        };
+        for (final entry in weekdays.entries) {
+          if (lower.contains(entry.key)) {
+            int ahead = entry.value - now.weekday;
+            if (ahead <= 0) ahead += 7;
+            if (lower.contains('next')) ahead += 7;
+            final t = now.add(Duration(days: ahead));
+            resolvedDate = DateTime(t.year, t.month, t.day);
+            break;
+          }
+        }
+        // Try ISO date
+        if (resolvedDate == null) {
+          try {
+            final parsed = DateTime.parse(dateStr);
+            resolvedDate =
+                DateTime(parsed.year, parsed.month, parsed.day);
+          } catch (_) {}
+        }
+      }
+    }
+
+    if (resolvedDate == null) return null;
+
+    // Resolve time
+    int hour = 9; // default 9 AM only if time provided
+    int minute = 0;
+    bool hasTime = false;
+
+    if (timeStr != null && timeStr.isNotEmpty) {
+      final lower = timeStr.toLowerCase();
+      final ampm = RegExp(
+          r'(\d{1,2})(?::(\d{2}))?\s*(am|pm)',
+          caseSensitive: false);
+      final match = ampm.firstMatch(lower);
+      if (match != null) {
+        int h = int.parse(match.group(1)!);
+        final m = int.tryParse(match.group(2) ?? '0') ?? 0;
+        final period = match.group(3)!.toLowerCase();
+        if (period == 'pm' && h != 12) h += 12;
+        if (period == 'am' && h == 12) h = 0;
+        hour = h;
+        minute = m;
+        hasTime = true;
+      } else {
+        // 24h format
+        final h24 = RegExp(r'\b(\d{1,2}):(\d{2})\b');
+        final h24m = h24.firstMatch(lower);
+        if (h24m != null) {
+          hour = int.parse(h24m.group(1)!);
+          minute = int.parse(h24m.group(2)!);
+          hasTime = true;
+        }
+      }
+      // If time string present but unparseable, don't invent time
+      if (!hasTime) return null;
+    } else {
+      // No time provided at all — cannot place on calendar reliably
+      return null;
+    }
+
+    return DateTime(
+        resolvedDate.year, resolvedDate.month, resolvedDate.day,
+        hour, minute);
+  }
+
+  String _formatDateTime(DateTime dt) {
+    const months = [
+      '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    final h = dt.hour > 12
+        ? dt.hour - 12
+        : (dt.hour == 0 ? 12 : dt.hour);
+    final m = dt.minute.toString().padLeft(2, '0');
+    final period = dt.hour >= 12 ? 'PM' : 'AM';
+    return '${months[dt.month]} ${dt.day} · $h:$m $period';
+  }
+
+  String _formatTime(DateTime dt) {
+    final h = dt.hour > 12
+        ? dt.hour - 12
+        : (dt.hour == 0 ? 12 : dt.hour);
+    final m = dt.minute.toString().padLeft(2, '0');
+    final period = dt.hour >= 12 ? 'PM' : 'AM';
+    return '$h:$m $period';
   }
 }
 

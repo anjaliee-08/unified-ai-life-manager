@@ -272,16 +272,29 @@ async def detect_intent(message: str) -> dict:
 
 RESPONSE_SYSTEM_PROMPT = """You are UAILM, a personal AI life manager assistant.
 
-You are given REAL data from the user's task database.
+You are given REAL data from the user's task database and calendar.
 
 Rules:
-- NEVER invent tasks, deadlines, or meetings not in the provided data.
+- NEVER invent tasks, deadlines, meetings, or calendar events not in the provided data.
 - If data shows no tasks, say there are none — do NOT make up tasks.
 - Be concise, friendly, and helpful.
-- Keep responses under 120 words.
+- Keep responses under 150 words unless asked for detail.
 - Format task lists cleanly with emojis for priority (🔴 high, 🟠 medium, 🟢 low).
 - If data is empty, acknowledge it naturally.
-- Speak in first person as UAILM."""
+- Speak in first person as UAILM.
+
+IMPORTANT — TIME REPORTING RULE:
+- If a task deadline time is 23:59 or 23:59:00, do NOT say "11:59 PM".
+  This is a system default meaning "end of day / no specific time".
+  Instead say only the date (e.g. "due Monday") without a time.
+- Only report a specific time (like "5:00 PM") when the data clearly
+  contains that time and it is not 23:59.
+
+IMPORTANT — CALENDAR ACTIONS:
+- NEVER say you have added, created, or scheduled a calendar event unless
+  the data explicitly tells you the creation succeeded.
+- If you are being asked to create an event, always confirm the details
+  with the user first — do not claim to have done it already."""
 
 async def generate_response(
     user_message: str,
@@ -692,16 +705,124 @@ async def agent_chat(
             )
 
     elif intent == "ACTION_CREATE_EVENT":
-        # Signal Flutter to show event creation UI
+        # Extract event details from intent classification
+        event_ref = intent_data.get("event_reference", "") or ""
+        time_ref = intent_data.get("time_reference", "") or ""
+
+        # Get calendar context sent from Flutter
+        cal_events = [e.dict() for e in (req.calendar_events or [])]
+
+        # ── Attempt to extract title and datetime from message ──
+        # Use Qwen to parse event details from the user's message
+        # into a structured format — then WE validate before acting.
+        parse_prompt = f"""Extract calendar event details from:
+"{req.message}"
+
+Reply with JSON only. No markdown.
+{{
+  "title": "event title or null",
+  "date": "date string or null",
+  "time": "time string or null",
+  "duration_hours": 1
+}}
+If any field cannot be determined from the message, use null."""
+
+        try:
+            parse_raw = await ollama.generate(
+                prompt=parse_prompt,
+                temperature=0.1,
+            )
+            import re as _re
+            parse_cleaned = _re.sub(r'```json|```', '', parse_raw).strip()
+            import json as _json
+            parsed = _json.loads(parse_cleaned)
+        except Exception:
+            parsed = {}
+
+        event_title = parsed.get('title') or event_ref or None
+        event_date = parsed.get('date') or None
+        event_time = parsed.get('time') or time_ref or None
+
+        # ── Conflict detection ─────────────────────────────────
+        # Only check if we have a time to compare against
+        conflict_warning = ""
+        if cal_events and event_time and event_date:
+            # Try to resolve the proposed event's time for comparison
+            from app.services.email_intelligence_service import resolve_deadline
+            proposed_start = resolve_deadline(
+                f"{event_date} {event_time}", datetime.now()
+            )
+            if proposed_start:
+                from datetime import timedelta
+                proposed_end = proposed_start + timedelta(hours=1)
+
+                for existing in cal_events:
+                    try:
+                        ex_start = datetime.fromisoformat(
+                            existing.get('start', ''))
+                        ex_end = datetime.fromisoformat(
+                            existing.get('end', ''))
+                        ex_title = existing.get('title', 'an event')
+
+                        # Strict overlap: touching boundaries are NOT conflicts
+                        if proposed_start < ex_end and proposed_end > ex_start:
+                            conflict_warning = (
+                                f"⚠️ You already have '{ex_title}' "
+                                f"at that time "
+                                f"({existing.get('time_string', '')}). "
+                                f"Do you still want to create this event?"
+                            )
+                            break
+                    except (ValueError, TypeError):
+                        continue
+
+        # ── Build confirmation response ────────────────────────
+        # NEVER claim the event was created here.
+        # Always require explicit Flutter-side confirmation
+        # which then calls CalendarService.createEvent().
+
+        if not event_title and not event_date and not event_time:
+            # Not enough info — ask user
+            return AgentResponse(
+                response=(
+                    "I'd be happy to add that to your calendar! "
+                    "Could you tell me:\n"
+                    "• Event title\n"
+                    "• Date\n"
+                    "• Time\n\n"
+                    "For example: 'Add team meeting tomorrow at 3 PM'"
+                )
+            )
+
+        # Build summary for confirmation dialog
+        details_parts = []
+        if event_title:
+            details_parts.append(f"**{event_title}**")
+        if event_date:
+            details_parts.append(event_date)
+        if event_time:
+            details_parts.append(f"at {event_time}")
+        details_str = " · ".join(details_parts) if details_parts else "this event"
+
+        confirmation_msg = (
+            f"I'll add this to your calendar:\n\n"
+            f"📅 {details_str}\n\n"
+        )
+        if conflict_warning:
+            confirmation_msg += f"{conflict_warning}\n\n"
+        confirmation_msg += "Shall I go ahead?"
+
         return AgentResponse(
-            response="I'd love to create a calendar event! "
-                     "Please tell me:\n"
-                     "• Event title\n"
-                     "• Date and time\n"
-                     "• Duration (optional)\n"
-                     "• Location (optional)\n\n"
-                     "For example: 'Create a meeting called Team Sync tomorrow at 3pm for 1 hour'",
-            action_taken="prompt_create_event"
+            response=confirmation_msg,
+            requires_confirmation=True,
+            pending_action={
+                "type": "create_calendar_event",
+                "title": event_title or "New Event",
+                "date": event_date,
+                "time": event_time,
+                "duration_hours": parsed.get("duration_hours", 1),
+                "has_conflict": bool(conflict_warning),
+            }
         )
 
     elif intent == "QUERY_ALL":

@@ -344,85 +344,167 @@ DateTime _toLocalDateTime(dynamic dt) {
   }
 
   // ── Calendar Write Operations ───────────────────────────────────
-
-  Future<CalendarCreateResult> createEvent({
-    required String title,
-    required DateTime start,
-    required DateTime end,
-    String? location,
-    String? description,
-  }) async {
-    if (!_hasPermission) {
-      final granted = await requestPermission();
-      if (!granted) {
-        return CalendarCreateResult(
-          success: false,
-          error: 'Calendar permission denied',
-        );
-      }
-    }
-
-    try {
-      _ensureTzInitialized();
-
-      final calendarsResult = await _plugin.retrieveCalendars();
-      if (!calendarsResult.isSuccess ||
-          calendarsResult.data == null) {
-        return CalendarCreateResult(
-            success: false, error: 'No calendars found');
-      }
-
-      final writableCalendars = calendarsResult.data!
-          .where((c) => !(c.isReadOnly ?? true))
-          .toList();
-
-      if (writableCalendars.isEmpty) {
-        return CalendarCreateResult(
-            success: false,
-            error: 'No writable calendar found');
-      }
-
-      final calendar = writableCalendars.first;
-
-      // Use local timezone — get device local location
-      final localLocation = tz.local;
-
-      final event = Event(
-        calendar.id,
-        title: title,
-        // Convert local DateTime to TZDateTime in device timezone
-        start: tz.TZDateTime(
-          localLocation,
-          start.year, start.month, start.day,
-          start.hour, start.minute,
-        ),
-        end: tz.TZDateTime(
-          localLocation,
-          end.year, end.month, end.day,
-          end.hour, end.minute,
-        ),
-        location: location,
-        description: description,
-      );
-
-      final result = await _plugin.createOrUpdateEvent(event);
-
-      if (result != null && result.isSuccess) {
-        return CalendarCreateResult(
-          success: true,
-          eventId: result.data,
-          calendarId: calendar.id,
-        );
-      }
+Future<CalendarCreateResult> createEvent({
+  required String title,
+  required DateTime start,
+  required DateTime end,
+  String? location,
+  String? description,
+}) async {
+  if (!_hasPermission) {
+    final granted = await requestPermission();
+    if (!granted) {
       return CalendarCreateResult(
         success: false,
-        error: result?.errors.join(', ') ?? 'Unknown error',
+        error: 'Calendar permission denied',
       );
-    } catch (e) {
-      return CalendarCreateResult(
-          success: false, error: e.toString());
     }
   }
+
+  try {
+    _ensureTzInitialized();
+
+    final calendarsResult = await _plugin.retrieveCalendars();
+    if (!calendarsResult.isSuccess ||
+        calendarsResult.data == null) {
+      return CalendarCreateResult(
+          success: false, error: 'No calendars found');
+    }
+
+    final allCalendars = calendarsResult.data!;
+
+    // ── Debug: log every discovered calendar ──────────────────
+    debugPrint('CalendarService: discovered '
+        '${allCalendars.length} calendars:');
+    for (int i = 0; i < allCalendars.length; i++) {
+      final c = allCalendars[i];
+      debugPrint(
+        '  [${i + 1}] name="${c.name}" '
+        'id=${c.id} '
+        'accountName=${c.accountName} '
+        'accountType=${c.accountType} '
+        'isDefault=${c.isDefault} '
+        'isReadOnly=${c.isReadOnly}',
+      );
+    }
+
+    // ── Calendar selection ─────────────────────────────────────
+    final writableCalendars = allCalendars
+        .where((c) => !(c.isReadOnly ?? true) && c.id != null)
+        .toList();
+
+    if (writableCalendars.isEmpty) {
+      return CalendarCreateResult(
+          success: false, error: 'No writable calendar found');
+    }
+
+    // Priority 1: writable Google calendar marked as default
+    Calendar? selected = writableCalendars.firstWhere(
+      (c) =>
+          (c.accountType ?? '').toLowerCase() == 'com.google' &&
+          (c.isDefault ?? false),
+      orElse: () => Calendar(),
+    );
+    // Priority 2: any writable Google calendar
+    if (selected.id == null) {
+      selected = writableCalendars.firstWhere(
+        (c) =>
+            (c.accountType ?? '').toLowerCase() == 'com.google',
+        orElse: () => Calendar(),
+      );
+    }
+    // Priority 3: first writable calendar
+    if (selected.id == null) {
+      selected = writableCalendars.first;
+    }
+
+    debugPrint(
+      'CalendarService: selected calendar '
+      '"${selected.name}" '
+      'id=${selected.id} '
+      'accountName=${selected.accountName} '
+      'isDefault=${selected.isDefault}',
+    );
+
+    // ── BUG FIX: Correct TZDateTime construction ───────────────
+    //
+    // WRONG (previous code):
+    //   tz.TZDateTime(tz.local, year, month, day, hour, minute)
+    //   tz.local is UTC after tzdata.initializeTimeZones() alone,
+    //   so this creates 17:00 UTC = 22:30 IST = wrong time.
+    //
+    // CORRECT:
+    //   start is a plain local DateTime (isUtc=false, hour=17).
+    //   start.toUtc() correctly converts using device timezone.
+    //   TZDateTime.fromMillisecondsSinceEpoch(UTC, epoch)
+    //   stores the right UTC epoch that device_calendar then
+    //   displays as the correct local time.
+    //
+    // No timezone is hardcoded. The device's own dart:core
+    // toUtc() conversion is used.
+
+    debugPrint(
+      'CalendarService: start=$start '
+      'isUtc=${start.isUtc} '
+      'iso=${start.toIso8601String()} '
+      'utcMs=${start.toUtc().millisecondsSinceEpoch}',
+    );
+    debugPrint(
+      'CalendarService: end=$end '
+      'isUtc=${end.isUtc} '
+      'iso=${end.toIso8601String()}',
+    );
+
+    final startTZ = tz.TZDateTime.fromMillisecondsSinceEpoch(
+      tz.UTC,
+      start.toUtc().millisecondsSinceEpoch,
+    );
+    final endTZ = tz.TZDateTime.fromMillisecondsSinceEpoch(
+      tz.UTC,
+      end.toUtc().millisecondsSinceEpoch,
+    );
+
+    debugPrint(
+      'CalendarService: startTZ=$startTZ '
+      'endTZ=$endTZ',
+    );
+
+    final event = Event(
+      selected.id,
+      title: title,
+      start: startTZ,
+      end: endTZ,
+      location: location,
+      description: description,
+    );
+
+    final result = await _plugin.createOrUpdateEvent(event);
+
+    if (result != null && result.isSuccess) {
+      debugPrint(
+        'CalendarService: event created '
+        'eventId=${result.data} '
+        'calendarId=${selected.id}',
+      );
+      return CalendarCreateResult(
+        success: true,
+        eventId: result.data,
+        calendarId: selected.id,
+      );
+    }
+
+    return CalendarCreateResult(
+      success: false,
+      error: result?.errors.join(', ') ?? 'Unknown error',
+    );
+  } catch (e, stack) {
+    debugPrint('CalendarService: createEvent error: $e\n$stack');
+    return CalendarCreateResult(
+        success: false, error: e.toString());
+  }
+}
+
+
 
   Future<bool> deleteEvent(
       String eventId, String calendarId) async {

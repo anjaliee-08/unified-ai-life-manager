@@ -5,18 +5,29 @@ import '../utils/app_theme.dart';
 class SmsExtractionCard extends StatelessWidget {
   final SmsExtractionModel extraction;
   final VoidCallback onDismiss;
-  // Phase 5B additions — null means no task button shown
+
+  // Phase 5B — task creation
   final VoidCallback? onCreateTask;
   final bool taskLoading;
   final bool taskCreated;
+
+  // Phase 5C — calendar event creation
+  final VoidCallback? onAddToCalendar;
+  final bool calendarLoading;
+  final bool calendarAdded;
 
   const SmsExtractionCard({
     super.key,
     required this.extraction,
     required this.onDismiss,
+    // Phase 5B
     this.onCreateTask,
     this.taskLoading = false,
     this.taskCreated = false,
+    // Phase 5C
+    this.onAddToCalendar,
+    this.calendarLoading = false,
+    this.calendarAdded = false,
   });
 
   Color get _typeColor {
@@ -54,12 +65,18 @@ class SmsExtractionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bool showTaskButton =
+        extraction.isActionableAndNotOtp && onCreateTask != null;
+    final bool showCalendarButton =
+        extraction.isCalendarEligible && onAddToCalendar != null;
+    final bool showAnyButton = showTaskButton || showCalendarButton;
+
     return AppCard(
       padding: const EdgeInsets.all(AppSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Header row ────────────────────────────────────────
+          // ── Header ────────────────────────────────────────────
           Row(
             children: [
               Container(
@@ -90,15 +107,11 @@ class SmsExtractionCard extends StatelessWidget {
                 color: _confidenceColor,
               ),
               const SizedBox(width: AppSpacing.sm),
-              // Hide dismiss when task already created
-              if (!taskCreated)
+              if (!taskCreated || !calendarAdded)
                 GestureDetector(
                   onTap: onDismiss,
-                  child: const Icon(
-                    Icons.close_rounded,
-                    color: AppColors.textMuted,
-                    size: 16,
-                  ),
+                  child: const Icon(Icons.close_rounded,
+                      color: AppColors.textMuted, size: 16),
                 ),
             ],
           ),
@@ -127,27 +140,19 @@ class SmsExtractionCard extends StatelessWidget {
 
           // ── Content ───────────────────────────────────────────
           if (extraction.isOtp) ...[
-            Text(
-              'One-time password detected',
-              style: AppTextStyles.titleMedium,
-            ),
+            Text('One-time password detected',
+                style: AppTextStyles.titleMedium),
             const SizedBox(height: 4),
-            Text(
-              'OTP content is not displayed for security.',
-              style: AppTextStyles.bodySmall,
-            ),
+            Text('OTP content is not displayed for security.',
+                style: AppTextStyles.bodySmall),
           ] else ...[
             if (extraction.title != null)
-              Text(
-                extraction.title!,
-                style: AppTextStyles.titleMedium,
-              ),
+              Text(extraction.title!,
+                  style: AppTextStyles.titleMedium),
             if (extraction.description != null) ...[
               const SizedBox(height: 4),
-              Text(
-                extraction.description!,
-                style: AppTextStyles.bodyMedium,
-              ),
+              Text(extraction.description!,
+                  style: AppTextStyles.bodyMedium),
             ],
             if (extraction.dateTimeDisplay != null) ...[
               const SizedBox(height: AppSpacing.sm),
@@ -196,8 +201,7 @@ class SmsExtractionCard extends StatelessWidget {
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
                   color: AppColors.surfaceLight,
-                  borderRadius:
-                      BorderRadius.circular(AppRadius.sm),
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
                 ),
                 child: Text(
                   extraction.originalSnippet.length > 120
@@ -209,54 +213,68 @@ class SmsExtractionCard extends StatelessWidget {
             ],
           ],
 
-          // ── Phase 5B: Create Task button ──────────────────────
-          // Only shown for actionable types.
-          // OTP, INFORMATION, OTHER: no button.
-          if (extraction.isActionable && !extraction.isOtp) ...[
+          // ── Action buttons ─────────────────────────────────────
+          if (showAnyButton) ...[
             const SizedBox(height: AppSpacing.md),
-            if (taskCreated)
-              // Success state — disable button, show confirmation
-              Row(
-                children: [
-                  const Icon(Icons.check_circle_rounded,
-                      color: AppColors.success, size: 16),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Task created ✓',
-                    style: AppTextStyles.labelLarge
-                        .copyWith(color: AppColors.success),
-                  ),
-                ],
-              )
-            else
-              Row(
-                children: [
-                  Expanded(
-                    child: AppButton(
-                      label: taskLoading
-                          ? 'Creating...'
-                          : 'Create Task',
-                      icon: taskLoading
-                          ? null
-                          : Icons.add_task_rounded,
-                      loading: taskLoading,
-                      // Disabled while loading to prevent duplicate taps
-                      onTap: taskLoading ? null : onCreateTask,
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  Expanded(
-                    child: AppButton(
-                      label: 'Dismiss',
-                      outlined: true,
-                      color: AppColors.textSecondary,
-                      onTap: onDismiss,
-                    ),
-                  ),
-                ],
+
+            // Phase 5B: Create Task button
+            if (showTaskButton) ...[
+              if (taskCreated)
+                _StatusRow(
+                  icon: Icons.check_circle_rounded,
+                  label: 'Task created ✓',
+                  color: AppColors.success,
+                )
+              else
+                AppButton(
+                  label: taskLoading ? 'Creating...' : 'Create Task',
+                  icon: taskLoading ? null : Icons.add_task_rounded,
+                  loading: taskLoading,
+                  width: double.infinity,
+                  onTap: taskLoading ? null : onCreateTask,
+                ),
+              const SizedBox(height: AppSpacing.sm),
+            ],
+
+            // Phase 5C: Add to Calendar button
+            if (showCalendarButton) ...[
+              if (calendarAdded)
+                _StatusRow(
+                  icon: Icons.event_available_rounded,
+                  label: 'Added to Calendar ✓',
+                  color: AppColors.accent,
+                )
+              else
+                AppButton(
+                  label: calendarLoading
+                      ? 'Adding...'
+                      : 'Add to Calendar',
+                  icon: calendarLoading
+                      ? null
+                      : Icons.calendar_month_rounded,
+                  loading: calendarLoading,
+                  // Use outlined style to visually separate
+                  // from the task button
+                  outlined: showTaskButton && !taskCreated,
+                  color: AppColors.accent,
+                  width: double.infinity,
+                  onTap: calendarLoading ? null : onAddToCalendar,
+                ),
+            ],
+
+            // Dismiss when neither button applies or all done
+            if (!showTaskButton && !showCalendarButton) ...[
+              const SizedBox(height: AppSpacing.sm),
+              AppButton(
+                label: 'Dismiss',
+                outlined: true,
+                color: AppColors.textSecondary,
+                width: double.infinity,
+                onTap: onDismiss,
               ),
+            ],
           ] else ...[
-            // Non-actionable types — dismiss only
+            // Non-actionable types
             const SizedBox(height: AppSpacing.sm),
             Text(
               'ℹ️ Informational — no action taken',
@@ -266,6 +284,31 @@ class SmsExtractionCard extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+class _StatusRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  const _StatusRow({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, color: color, size: 16),
+        const SizedBox(width: 6),
+        Text(label,
+            style: AppTextStyles.labelLarge
+                .copyWith(color: color)),
+      ],
     );
   }
 }
